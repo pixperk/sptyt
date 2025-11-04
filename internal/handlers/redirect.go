@@ -360,3 +360,157 @@ func (h *Handler) handleSpotifyLink(c echo.Context, link string) error {
 	c.Response().Header().Set("X-Cache", "MISS")
 	return c.Redirect(http.StatusMovedPermanently, youtubeURL)
 }
+
+func (h *Handler) SmartLyricVideoRedirect(c echo.Context) error {
+	link := c.Param("link")
+	linkType := utils.DetectLinkType(link)
+
+	switch linkType {
+	case utils.LinkTypeYouTube:
+		return h.youtubeToLyricVideo(c, link)
+	case utils.LinkTypeSpotify:
+		return h.LyricVideoRedirect(c)
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid link format"})
+	}
+}
+
+func (h *Handler) SmartGeniusRedirect(c echo.Context) error {
+	link := c.Param("link")
+	linkType := utils.DetectLinkType(link)
+
+	switch linkType {
+	case utils.LinkTypeYouTube:
+		return h.youtubeToGenius(c, link)
+	case utils.LinkTypeSpotify:
+		return h.GeniusRedirect(c)
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid link format"})
+	}
+}
+
+func (h *Handler) youtubeToLyricVideo(c echo.Context, link string) error {
+	videoID, err := utils.ExtractYouTubeVideoID(link)
+	if err != nil || videoID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid youtube link"})
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
+	defer cancel()
+
+	if cachedURL, err := h.cache.GetClient().Get(ctx, "yt2ly:"+videoID).Result(); err == nil {
+		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+		c.Response().Header().Set("X-Cache", "HIT")
+		return c.Redirect(http.StatusMovedPermanently, cachedURL)
+	}
+
+	title, description, apiISRC, err := h.youtubeClient.GetVideoMetadata(ctx, videoID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch video metadata"})
+	}
+
+	var trackName, artistName string
+
+	if apiISRC != "" {
+		track, err := h.spotifyClient.GetTrackByISRC(ctx, apiISRC)
+		if err == nil {
+			trackName = track.Name
+			artistName = strings.Join(track.Artists, " ")
+		}
+	}
+
+	if trackName == "" {
+		isrc := utils.ExtractISRCFromDescription(description)
+		if isrc != "" {
+			track, err := h.spotifyClient.GetTrackByISRC(ctx, isrc)
+			if err == nil {
+				trackName = track.Name
+				artistName = strings.Join(track.Artists, " ")
+			}
+		}
+	}
+
+	if trackName == "" {
+		parsed := utils.ParseYouTubeTitle(title)
+		trackName = parsed.Track
+		artistName = parsed.Artist
+	}
+
+	if trackName == "" {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not parse track info"})
+	}
+
+	lyricVideoURL, err := h.youtubeClient.SearchLyricVideo(ctx, trackName, artistName)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to find lyric video"})
+	}
+
+	h.cache.GetClient().Set(ctx, "yt2ly:"+videoID, lyricVideoURL, 1*time.Hour)
+
+	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+	c.Response().Header().Set("X-Cache", "MISS")
+	return c.Redirect(http.StatusMovedPermanently, lyricVideoURL)
+}
+
+func (h *Handler) youtubeToGenius(c echo.Context, link string) error {
+	videoID, err := utils.ExtractYouTubeVideoID(link)
+	if err != nil || videoID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid youtube link"})
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
+	defer cancel()
+
+	if cachedURL, err := h.cache.GetClient().Get(ctx, "yt2gn:"+videoID).Result(); err == nil {
+		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+		c.Response().Header().Set("X-Cache", "HIT")
+		return c.Redirect(http.StatusMovedPermanently, cachedURL)
+	}
+
+	title, description, apiISRC, err := h.youtubeClient.GetVideoMetadata(ctx, videoID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch video metadata"})
+	}
+
+	var trackName, artistName string
+
+	if apiISRC != "" {
+		track, err := h.spotifyClient.GetTrackByISRC(ctx, apiISRC)
+		if err == nil {
+			trackName = track.Name
+			artistName = strings.Join(track.Artists, " ")
+		}
+	}
+
+	if trackName == "" {
+		isrc := utils.ExtractISRCFromDescription(description)
+		if isrc != "" {
+			track, err := h.spotifyClient.GetTrackByISRC(ctx, isrc)
+			if err == nil {
+				trackName = track.Name
+				artistName = strings.Join(track.Artists, " ")
+			}
+		}
+	}
+
+	if trackName == "" {
+		parsed := utils.ParseYouTubeTitle(title)
+		trackName = parsed.Track
+		artistName = parsed.Artist
+	}
+
+	if trackName == "" {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not parse track info"})
+	}
+
+	geniusURL, err := h.geniusClient.SearchLyrics(ctx, trackName, artistName)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to find lyrics on genius"})
+	}
+
+	h.cache.GetClient().Set(ctx, "yt2gn:"+videoID, geniusURL, 1*time.Hour)
+
+	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+	c.Response().Header().Set("X-Cache", "MISS")
+	return c.Redirect(http.StatusMovedPermanently, geniusURL)
+}

@@ -269,3 +269,57 @@ func (c *Client) SearchByTitle(ctx context.Context, query string) (string, error
 
 	return searchResp.Tracks.Items[0].ExternalUrls.Spotify, nil
 }
+
+func (c *Client) GetTrackByISRC(ctx context.Context, isrc string) (*Track, error) {
+	if err := c.authenticate(ctx); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	token := c.accessToken
+	c.mu.RUnlock()
+
+	query := url.Values{}
+	query.Set("q", "isrc:"+isrc)
+	query.Set("type", "track")
+	query.Set("limit", "1")
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.spotify.com/v1/search?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("spotify search failed: %s", body)
+	}
+
+	var searchResp searchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, err
+	}
+
+	if len(searchResp.Tracks.Items) == 0 {
+		return nil, fmt.Errorf("no track found for ISRC: %s", isrc)
+	}
+
+	item := searchResp.Tracks.Items[0]
+	artists := make([]string, len(item.Artists))
+	for i, artist := range item.Artists {
+		artists[i] = artist.Name
+	}
+
+	return &Track{
+		Name:    item.Name,
+		Artists: artists,
+		ISRC:    item.ExternalIds.ISRC,
+	}, nil
+}

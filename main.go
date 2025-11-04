@@ -62,8 +62,8 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(rateLimiter.Middleware())
 
-	e.GET("/ly/:spotify_link", handler.LyricVideoRedirect)
-	e.GET("/gn/:spotify_link", handler.GeniusRedirect)
+	e.GET("/ly/:link", handler.SmartLyricVideoRedirect)
+	e.GET("/gn/:link", handler.SmartGeniusRedirect)
 	e.GET("/yt/:youtube_link", handler.YouTubeToSpotifyRedirect)
 	e.GET("/:link", handler.SmartRedirect)
 
