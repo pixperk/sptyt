@@ -64,7 +64,8 @@ func main() {
 
 	e.GET("/ly/:spotify_link", handler.LyricVideoRedirect)
 	e.GET("/gn/:spotify_link", handler.GeniusRedirect)
-	e.GET("/:spotify_link", handler.SpotifyRedirect)
+	e.GET("/yt/:youtube_link", handler.YouTubeToSpotifyRedirect)
+	e.GET("/:link", handler.SmartRedirect)
 
 	port := os.Getenv("PORT")
 	if port == "" {
