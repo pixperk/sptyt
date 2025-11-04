@@ -109,6 +109,10 @@ func (r *RedisCache) SetGeniusURL(ctx context.Context, trackID string, url strin
 	return r.client.Set(ctx, key, url, ttl).Err()
 }
 
+func (r *RedisCache) GetClient() *redis.Client {
+	return r.client
+}
+
 func (r *RedisCache) Close() error {
 	return r.client.Close()
 }

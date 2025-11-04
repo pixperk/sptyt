@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -10,6 +11,7 @@ import (
 	"github.com/pixperk/sptyt/internal/cache"
 	"github.com/pixperk/sptyt/internal/genius"
 	"github.com/pixperk/sptyt/internal/handlers"
+	custommw "github.com/pixperk/sptyt/internal/middleware"
 	"github.com/pixperk/sptyt/internal/spotify"
 	"github.com/pixperk/sptyt/internal/youtube"
 )
@@ -24,6 +26,7 @@ func main() {
 	youtubeAPIKey := os.Getenv("YOUTUBE_API_KEY")
 	geniusAccessToken := os.Getenv("GENIUS_ACCESS_TOKEN")
 	redisURL := os.Getenv("REDIS_URL")
+	rateLimitStr := os.Getenv("RATE_LIMIT_PER_MINUTE")
 
 	if spotifyClientID == "" || spotifyClientSecret == "" || youtubeAPIKey == "" || geniusAccessToken == "" {
 		log.Fatal("Missing required environment variables")
@@ -33,11 +36,20 @@ func main() {
 		redisURL = "redis://localhost:6379"
 	}
 
+	rateLimit := 60
+	if rateLimitStr != "" {
+		if limit, err := strconv.Atoi(rateLimitStr); err == nil && limit > 0 {
+			rateLimit = limit
+		}
+	}
+
 	redisCache, err := cache.NewRedisCache(redisURL)
 	if err != nil {
 		log.Fatal("Failed to connect to Redis:", err)
 	}
 	defer redisCache.Close()
+
+	rateLimiter := custommw.NewRateLimiter(redisCache.GetClient(), rateLimit)
 
 	spotifyClient := spotify.NewClient(spotifyClientID, spotifyClientSecret)
 	youtubeClient := youtube.NewClient(youtubeAPIKey)
@@ -48,6 +60,7 @@ func main() {
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
+	e.Use(rateLimiter.Middleware())
 
 	e.GET("/ly/:spotify_link", handler.LyricVideoRedirect)
 	e.GET("/gn/:spotify_link", handler.GeniusRedirect)
