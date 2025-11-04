@@ -79,13 +79,23 @@ func (r *RedisCache) SetTrack(ctx context.Context, trackID string, track *Cached
 	return r.client.Set(ctx, key, data, ttl).Err()
 }
 
-func (r *RedisCache) GetYouTubeURL(ctx context.Context, trackID string) (string, error) {
-	key := "youtube:" + trackID
+func (r *RedisCache) GetYouTubeMVURL(ctx context.Context, trackID string) (string, error) {
+	key := "youtube:mv:" + trackID
 	return r.client.Get(ctx, key).Result()
 }
 
-func (r *RedisCache) SetYouTubeURL(ctx context.Context, trackID string, url string, ttl time.Duration) error {
-	key := "youtube:" + trackID
+func (r *RedisCache) SetYouTubeMVURL(ctx context.Context, trackID string, url string, ttl time.Duration) error {
+	key := "youtube:mv:" + trackID
+	return r.client.Set(ctx, key, url, ttl).Err()
+}
+
+func (r *RedisCache) GetYouTubeLyricsURL(ctx context.Context, trackID string) (string, error) {
+	key := "youtube:lyrics:" + trackID
+	return r.client.Get(ctx, key).Result()
+}
+
+func (r *RedisCache) SetYouTubeLyricsURL(ctx context.Context, trackID string, url string, ttl time.Duration) error {
+	key := "youtube:lyrics:" + trackID
 	return r.client.Set(ctx, key, url, ttl).Err()
 }
 

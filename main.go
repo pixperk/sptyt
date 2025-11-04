@@ -49,7 +49,8 @@ func main() {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
-	e.GET("/ly/:spotify_link", handler.GeniusRedirect)
+	e.GET("/ly/:spotify_link", handler.LyricVideoRedirect)
+	e.GET("/gn/:spotify_link", handler.GeniusRedirect)
 	e.GET("/:spotify_link", handler.SpotifyRedirect)
 
 	port := os.Getenv("PORT")

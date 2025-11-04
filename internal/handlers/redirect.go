@@ -41,7 +41,55 @@ func (h *Handler) SpotifyRedirect(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
 	defer cancel()
 
-	if cachedURL, err := h.cache.GetYouTubeURL(ctx, trackID); err == nil {
+	if cachedURL, err := h.cache.GetYouTubeMVURL(ctx, trackID); err == nil {
+		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+		c.Response().Header().Set("X-Cache", "HIT")
+		return c.Redirect(http.StatusMovedPermanently, cachedURL)
+	}
+
+	var track *spotify.Track
+	if cachedTrack, err := h.cache.GetTrack(ctx, trackID); err == nil {
+		track = &spotify.Track{
+			Name:    cachedTrack.Name,
+			Artists: cachedTrack.Artists,
+		}
+	} else {
+		track, err = h.spotifyClient.GetTrack(ctx, trackID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch track info"})
+		}
+		h.cache.SetTrack(ctx, trackID, &cache.CachedTrack{
+			Name:    track.Name,
+			Artists: track.Artists,
+		}, 24*time.Hour)
+	}
+
+	artist := strings.Join(track.Artists, " ")
+
+	youtubeURL, err := h.youtubeClient.SearchOfficialMV(ctx, track.Name, artist)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to find youtube video"})
+	}
+
+	h.cache.SetYouTubeMVURL(ctx, trackID, youtubeURL, 1*time.Hour)
+
+	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+	c.Response().Header().Set("X-Cache", "MISS")
+	return c.Redirect(http.StatusMovedPermanently, youtubeURL)
+}
+
+func (h *Handler) LyricVideoRedirect(c echo.Context) error {
+	spotifyLink := c.Param("spotify_link")
+
+	trackID, err := utils.ExtractSpotifyTrackID(spotifyLink)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid spotify link or ID"})
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
+	defer cancel()
+
+	if cachedURL, err := h.cache.GetYouTubeLyricsURL(ctx, trackID); err == nil {
 		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 		c.Response().Header().Set("X-Cache", "HIT")
 		return c.Redirect(http.StatusMovedPermanently, cachedURL)
@@ -68,10 +116,10 @@ func (h *Handler) SpotifyRedirect(c echo.Context) error {
 
 	youtubeURL, err := h.youtubeClient.SearchLyricVideo(ctx, track.Name, artist)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to find youtube video"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to find youtube lyric video"})
 	}
 
-	h.cache.SetYouTubeURL(ctx, trackID, youtubeURL, 1*time.Hour)
+	h.cache.SetYouTubeLyricsURL(ctx, trackID, youtubeURL, 1*time.Hour)
 
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
