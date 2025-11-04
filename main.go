@@ -7,6 +7,9 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/pixperk/sptyt/internal/handlers"
+	"github.com/pixperk/sptyt/internal/spotify"
+	"github.com/pixperk/sptyt/internal/youtube"
 )
 
 func main() {
@@ -14,12 +17,24 @@ func main() {
 		log.Println("No .env file found")
 	}
 
+	spotifyClientID := os.Getenv("SPOTIFY_CLIENT_ID")
+	spotifyClientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
+	youtubeAPIKey := os.Getenv("YOUTUBE_API_KEY")
+
+	if spotifyClientID == "" || spotifyClientSecret == "" || youtubeAPIKey == "" {
+		log.Fatal("Missing required environment variables")
+	}
+
+	spotifyClient := spotify.NewClient(spotifyClientID, spotifyClientSecret)
+	youtubeClient := youtube.NewClient(youtubeAPIKey)
+	handler := handlers.NewHandler(spotifyClient, youtubeClient)
+
 	e := echo.New()
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
-	e.GET("/:spotify_link", handleSpotifyRedirect)
+	e.GET("/:spotify_link", handler.SpotifyRedirect)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -27,10 +42,4 @@ func main() {
 	}
 
 	e.Logger.Fatal(e.Start(":" + port))
-}
-
-func handleSpotifyRedirect(c echo.Context) error {
-	spotifyLink := c.Param("spotify_link")
-
-	return c.String(200, "Received: "+spotifyLink)
 }
