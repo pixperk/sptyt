@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"os"
-	"strconv"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -24,26 +23,17 @@ func main() {
 	spotifyClientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
 	youtubeAPIKey := os.Getenv("YOUTUBE_API_KEY")
 	geniusAccessToken := os.Getenv("GENIUS_ACCESS_TOKEN")
-	redisAddr := os.Getenv("REDIS_ADDR")
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	redisDBStr := os.Getenv("REDIS_DB")
+	redisURL := os.Getenv("REDIS_URL")
 
 	if spotifyClientID == "" || spotifyClientSecret == "" || youtubeAPIKey == "" || geniusAccessToken == "" {
 		log.Fatal("Missing required environment variables")
 	}
 
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
 	}
 
-	redisDB := 0
-	if redisDBStr != "" {
-		if db, err := strconv.Atoi(redisDBStr); err == nil {
-			redisDB = db
-		}
-	}
-
-	redisCache, err := cache.NewRedisCache(redisAddr, redisPassword, redisDB)
+	redisCache, err := cache.NewRedisCache(redisURL)
 	if err != nil {
 		log.Fatal("Failed to connect to Redis:", err)
 	}

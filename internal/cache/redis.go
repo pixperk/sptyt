@@ -21,18 +21,28 @@ type CachedRedirect struct {
 	URL string `json:"url"`
 }
 
-func NewRedisCache(addr, password string, db int) (*RedisCache, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		Password:     password,
-		DB:           db,
-		PoolSize:     50,
-		MinIdleConns: 10,
-		MaxRetries:   3,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-	})
+func NewRedisCache(connString string) (*RedisCache, error) {
+	var client *redis.Client
+
+	if opt, err := redis.ParseURL(connString); err == nil {
+		opt.PoolSize = 50
+		opt.MinIdleConns = 10
+		opt.MaxRetries = 3
+		opt.DialTimeout = 5 * time.Second
+		opt.ReadTimeout = 3 * time.Second
+		opt.WriteTimeout = 3 * time.Second
+		client = redis.NewClient(opt)
+	} else {
+		client = redis.NewClient(&redis.Options{
+			Addr:         connString,
+			PoolSize:     50,
+			MinIdleConns: 10,
+			MaxRetries:   3,
+			DialTimeout:  5 * time.Second,
+			ReadTimeout:  3 * time.Second,
+			WriteTimeout: 3 * time.Second,
+		})
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
