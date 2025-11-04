@@ -24,9 +24,19 @@ type searchResponse struct {
 }
 
 func NewClient(apiKey string) *Client {
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  false,
+	}
+
 	return &Client{
-		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		apiKey: apiKey,
+		httpClient: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 

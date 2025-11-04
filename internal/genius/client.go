@@ -26,9 +26,19 @@ type searchResponse struct {
 }
 
 func NewClient(accessToken string) *Client {
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  false,
+	}
+
 	return &Client{
 		accessToken: accessToken,
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 

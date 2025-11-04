@@ -40,10 +40,36 @@ type trackResponse struct {
 }
 
 func NewClient(clientID, clientSecret string) *Client {
-	return &Client{
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  false,
+	}
+
+	client := &Client{
 		clientID:     clientID,
 		clientSecret: clientSecret,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
+	}
+
+	go client.refreshTokenLoop()
+
+	return client
+}
+
+func (c *Client) refreshTokenLoop() {
+	ctx := context.Background()
+	c.authenticate(ctx)
+
+	ticker := time.NewTicker(55 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.authenticate(ctx)
 	}
 }
 
