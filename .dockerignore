@@ -1,0 +1,28 @@
+# Git
+.git
+.gitignore
+
+# Environment
+.env
+.env.local
+
+# Documentation
+README.md
+LICENSE
+
+# IDE
+.vscode
+.idea
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+main
+
+# Test files
+*_test.go
+
+# Misc
+.DS_Store
