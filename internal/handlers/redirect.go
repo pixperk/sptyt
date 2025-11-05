@@ -48,6 +48,13 @@ func (h *Handler) SpotifyRedirect(c echo.Context) error {
 	if cachedURL, err := h.cache.GetYouTubeMVURL(ctx, trackID); err == nil {
 		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 		c.Response().Header().Set("X-Cache", "HIT")
+		// Check if mobile and convert to app URL
+		if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+			youtubeAppURL := h.convertToYouTubeAppURL(cachedURL)
+			if youtubeAppURL != "" {
+				return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+			}
+		}
 		return c.Redirect(http.StatusMovedPermanently, cachedURL)
 	}
 
@@ -79,6 +86,13 @@ func (h *Handler) SpotifyRedirect(c echo.Context) error {
 
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
+	// Check if mobile and convert to app URL
+	if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+		youtubeAppURL := h.convertToYouTubeAppURL(youtubeURL)
+		if youtubeAppURL != "" {
+			return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+		}
+	}
 	return c.Redirect(http.StatusMovedPermanently, youtubeURL)
 }
 
@@ -99,6 +113,13 @@ func (h *Handler) spotifyToLyricVideo(c echo.Context, spotifyLink string) error 
 	if cachedURL, err := h.cache.GetYouTubeLyricsURL(ctx, trackID); err == nil {
 		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 		c.Response().Header().Set("X-Cache", "HIT")
+		// Check if mobile and convert to app URL
+		if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+			youtubeAppURL := h.convertToYouTubeAppURL(cachedURL)
+			if youtubeAppURL != "" {
+				return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+			}
+		}
 		return c.Redirect(http.StatusMovedPermanently, cachedURL)
 	}
 
@@ -130,6 +151,13 @@ func (h *Handler) spotifyToLyricVideo(c echo.Context, spotifyLink string) error 
 
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
+	// Check if mobile and convert to app URL
+	if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+		youtubeAppURL := h.convertToYouTubeAppURL(youtubeURL)
+		if youtubeAppURL != "" {
+			return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+		}
+	}
 	return c.Redirect(http.StatusMovedPermanently, youtubeURL)
 }
 
@@ -202,6 +230,13 @@ func (h *Handler) YouTubeToSpotifyRedirect(c echo.Context) error {
 	if cachedURL, err := h.cache.GetClient().Get(ctx, "yt2sp:"+videoID).Result(); err == nil {
 		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 		c.Response().Header().Set("X-Cache", "HIT")
+		// Check if mobile and convert to app URL
+		if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+			spotifyAppURL := h.convertToSpotifyAppURL(cachedURL)
+			if spotifyAppURL != "" {
+				return c.Redirect(http.StatusMovedPermanently, spotifyAppURL)
+			}
+		}
 		return c.Redirect(http.StatusMovedPermanently, cachedURL)
 	}
 
@@ -226,6 +261,13 @@ func (h *Handler) YouTubeToSpotifyRedirect(c echo.Context) error {
 			c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 			c.Response().Header().Set("X-Cache", "MISS")
 			c.Response().Header().Set("X-Match-Method", "ISRC")
+			// Check if mobile and convert to app URL
+			if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+				spotifyAppURL := h.convertToSpotifyAppURL(spotifyURL)
+				if spotifyAppURL != "" {
+					return c.Redirect(http.StatusMovedPermanently, spotifyAppURL)
+				}
+			}
 			return c.Redirect(http.StatusMovedPermanently, spotifyURL)
 		}
 	}
@@ -247,6 +289,13 @@ func (h *Handler) YouTubeToSpotifyRedirect(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
 	c.Response().Header().Set("X-Match-Method", "title-parse")
+	// Check if mobile and convert to app URL
+	if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+		spotifyAppURL := h.convertToSpotifyAppURL(spotifyURL)
+		if spotifyAppURL != "" {
+			return c.Redirect(http.StatusMovedPermanently, spotifyAppURL)
+		}
+	}
 	return c.Redirect(http.StatusMovedPermanently, spotifyURL)
 }
 
@@ -285,6 +334,13 @@ func (h *Handler) handleYouTubeLink(c echo.Context, link string) error {
 	if cachedURL, err := h.cache.GetClient().Get(ctx, "yt2sp:"+videoID).Result(); err == nil {
 		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 		c.Response().Header().Set("X-Cache", "HIT")
+		// Check if mobile and convert to app URL
+		if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+			spotifyAppURL := h.convertToSpotifyAppURL(cachedURL)
+			if spotifyAppURL != "" {
+				return c.Redirect(http.StatusMovedPermanently, spotifyAppURL)
+			}
+		}
 		return c.Redirect(http.StatusMovedPermanently, cachedURL)
 	}
 
@@ -309,6 +365,13 @@ func (h *Handler) handleYouTubeLink(c echo.Context, link string) error {
 			c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 			c.Response().Header().Set("X-Cache", "MISS")
 			c.Response().Header().Set("X-Match-Method", "ISRC")
+			// Check if mobile and convert to app URL
+			if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+				spotifyAppURL := h.convertToSpotifyAppURL(spotifyURL)
+				if spotifyAppURL != "" {
+					return c.Redirect(http.StatusMovedPermanently, spotifyAppURL)
+				}
+			}
 			return c.Redirect(http.StatusMovedPermanently, spotifyURL)
 		}
 	}
@@ -330,6 +393,13 @@ func (h *Handler) handleYouTubeLink(c echo.Context, link string) error {
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
 	c.Response().Header().Set("X-Match-Method", "title-parse")
+	// Check if mobile and convert to app URL
+	if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+		spotifyAppURL := h.convertToSpotifyAppURL(spotifyURL)
+		if spotifyAppURL != "" {
+			return c.Redirect(http.StatusMovedPermanently, spotifyAppURL)
+		}
+	}
 	return c.Redirect(http.StatusMovedPermanently, spotifyURL)
 }
 
@@ -345,6 +415,13 @@ func (h *Handler) handleSpotifyLink(c echo.Context, link string) error {
 	if cachedURL, err := h.cache.GetYouTubeMVURL(ctx, trackID); err == nil {
 		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 		c.Response().Header().Set("X-Cache", "HIT")
+		// Check if mobile and convert to app URL
+		if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+			youtubeAppURL := h.convertToYouTubeAppURL(cachedURL)
+			if youtubeAppURL != "" {
+				return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+			}
+		}
 		return c.Redirect(http.StatusMovedPermanently, cachedURL)
 	}
 
@@ -376,6 +453,13 @@ func (h *Handler) handleSpotifyLink(c echo.Context, link string) error {
 
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
+	// Check if mobile and convert to app URL
+	if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+		youtubeAppURL := h.convertToYouTubeAppURL(youtubeURL)
+		if youtubeAppURL != "" {
+			return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+		}
+	}
 	return c.Redirect(http.StatusMovedPermanently, youtubeURL)
 }
 
@@ -427,6 +511,13 @@ func (h *Handler) youtubeToLyricVideo(c echo.Context, link string) error {
 	if cachedURL, err := h.cache.GetClient().Get(ctx, "yt2ly:"+videoID).Result(); err == nil {
 		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 		c.Response().Header().Set("X-Cache", "HIT")
+		// Check if mobile and convert to app URL
+		if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+			youtubeAppURL := h.convertToYouTubeAppURL(cachedURL)
+			if youtubeAppURL != "" {
+				return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+			}
+		}
 		return c.Redirect(http.StatusMovedPermanently, cachedURL)
 	}
 
@@ -475,6 +566,13 @@ func (h *Handler) youtubeToLyricVideo(c echo.Context, link string) error {
 
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
+	// Check if mobile and convert to app URL
+	if isMobile, ok := c.Get("is_mobile").(bool); ok && isMobile {
+		youtubeAppURL := h.convertToYouTubeAppURL(lyricVideoURL)
+		if youtubeAppURL != "" {
+			return c.Redirect(http.StatusMovedPermanently, youtubeAppURL)
+		}
+	}
 	return c.Redirect(http.StatusMovedPermanently, lyricVideoURL)
 }
 
@@ -539,4 +637,24 @@ func (h *Handler) youtubeToGenius(c echo.Context, link string) error {
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	c.Response().Header().Set("X-Cache", "MISS")
 	return c.Redirect(http.StatusMovedPermanently, geniusURL)
+}
+
+// convertToSpotifyAppURL converts a Spotify web URL to app URL scheme
+func (h *Handler) convertToSpotifyAppURL(webURL string) string {
+	// Extract track ID from Spotify URL
+	trackID, err := utils.ExtractSpotifyTrackID(webURL)
+	if err != nil || trackID == "" {
+		return ""
+	}
+	return "spotify:track:" + trackID
+}
+
+// convertToYouTubeAppURL converts a YouTube web URL to app URL scheme
+func (h *Handler) convertToYouTubeAppURL(webURL string) string {
+	// Extract video ID from YouTube URL
+	videoID, err := utils.ExtractYouTubeVideoID(webURL)
+	if err != nil || videoID == "" {
+		return ""
+	}
+	return "vnd.youtube://watch?v=" + videoID
 }

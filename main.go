@@ -61,6 +61,7 @@ func main() {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(rateLimiter.Middleware())
+	e.Use(custommw.MobileAppRedirect())
 
 	// Static files
 	e.Static("/static", "web/static")
