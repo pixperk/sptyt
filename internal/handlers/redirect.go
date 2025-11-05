@@ -30,6 +30,10 @@ func NewHandler(spotifyClient *spotify.Client, youtubeClient *youtube.Client, ge
 	}
 }
 
+func (h *Handler) Home(c echo.Context) error {
+	return c.File("web/templates/index.html")
+}
+
 func (h *Handler) SpotifyRedirect(c echo.Context) error {
 	spotifyLink := c.Param("spotify_link")
 

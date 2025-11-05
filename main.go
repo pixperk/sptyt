@@ -62,6 +62,13 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(rateLimiter.Middleware())
 
+	// Static files
+	e.Static("/static", "web/static")
+
+	// Home page
+	e.GET("/", handler.Home)
+
+	// API routes
 	e.GET("/ly/:link", handler.SmartLyricVideoRedirect)
 	e.GET("/gn/:link", handler.SmartGeniusRedirect)
 	e.GET("/yt/:youtube_link", handler.YouTubeToSpotifyRedirect)

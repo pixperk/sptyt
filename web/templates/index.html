@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sptyt - Convert Music Links Instantly</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>sptyt</h1>
+        <p class="subtitle">Convert Music Links Instantly</p>
+
+        <h2>How to Use</h2>
+
+        <h3>Convert Spotify to YouTube</h3>
+        <p>Add your Spotify link after <code>sptyt.xyz/</code>:</p>
+        <p><code>sptyt.xyz/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8</code></p>
+        <p>Or just use the track ID:</p>
+        <p><code>sptyt.xyz/4PTG3Z6ehGkBFwjybzWkR8</code></p>
+
+        <h3>Convert YouTube to Spotify</h3>
+        <p>Works the same way with YouTube links:</p>
+        <p><code>sptyt.xyz/https://youtu.be/dQw4w9WgXcQ</code></p>
+        <p>Supports all YouTube URL formats:</p>
+        <ul>
+            <li>Full URLs: <code>youtube.com/watch?v=...</code></li>
+            <li>Short URLs: <code>youtu.be/...</code></li>
+            <li>Shorts: <code>youtube.com/shorts/...</code></li>
+        </ul>
+
+        <h3>Get Lyric Videos</h3>
+        <p>Add <code>/ly/</code> before your link:</p>
+        <ul>
+            <li>From Spotify: <code>sptyt.xyz/ly/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8</code></li>
+            <li>From YouTube: <code>sptyt.xyz/ly/https://youtu.be/dQw4w9WgXcQ</code></li>
+        </ul>
+
+        <h3>Get Genius Lyrics</h3>
+        <p>Add <code>/gn/</code> before your link:</p>
+        <ul>
+            <li>From Spotify: <code>sptyt.xyz/gn/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8</code></li>
+            <li>From YouTube: <code>sptyt.xyz/gn/https://youtu.be/dQw4w9WgXcQ</code></li>
+        </ul>
+
+        <h2>Important Notes</h2>
+
+        <h3>Matching Accuracy</h3>
+        <div class="note">
+            <strong>YouTube → Spotify conversions are not 100% accurate.</strong>
+        </div>
+        <p><strong>Works best with:</strong></p>
+        <ul>
+            <li>Official music videos and uploads</li>
+            <li>Videos with proper metadata</li>
+        </ul>
+        <p><strong>May not work correctly with:</strong></p>
+        <ul>
+            <li>Covers, remixes, live versions</li>
+            <li>Fan uploads with incorrect information</li>
+            <li>Non-music videos</li>
+        </ul>
+
+        <h3>Lyric Videos</h3>
+        <p>Not all songs have lyric videos. If a lyric video doesn't exist, you might get redirected to the official music video instead.</p>
+
+        <h3>Genius Lyrics</h3>
+        <p>Lyrics availability depends on community submissions. Some songs may not be available on Genius.</p>
+
+        <h2>Rate Limits</h2>
+        <p>60 requests per minute per IP address. If you exceed this, wait a minute and try again.</p>
+    </div>
+</body>
+</html>
