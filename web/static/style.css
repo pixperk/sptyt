@@ -5,7 +5,8 @@
 }
 
 body {
-    font-family: 'Noto Serif', serif;
+    font-family: 'Noto Serif Display', serif;
+    font-stretch: extra-condensed;
     background: #0a0a0a;
     color: #e0e0e0;
     line-height: 1.7;
