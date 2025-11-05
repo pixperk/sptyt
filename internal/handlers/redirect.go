@@ -80,7 +80,10 @@ func (h *Handler) SpotifyRedirect(c echo.Context) error {
 
 func (h *Handler) LyricVideoRedirect(c echo.Context) error {
 	spotifyLink := c.Param("spotify_link")
+	return h.spotifyToLyricVideo(c, spotifyLink)
+}
 
+func (h *Handler) spotifyToLyricVideo(c echo.Context, spotifyLink string) error {
 	trackID, err := utils.ExtractSpotifyTrackID(spotifyLink)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid spotify link or ID"})
@@ -128,7 +131,10 @@ func (h *Handler) LyricVideoRedirect(c echo.Context) error {
 
 func (h *Handler) GeniusRedirect(c echo.Context) error {
 	spotifyLink := c.Param("spotify_link")
+	return h.spotifyToGenius(c, spotifyLink)
+}
 
+func (h *Handler) spotifyToGenius(c echo.Context, spotifyLink string) error {
 	trackID, err := utils.ExtractSpotifyTrackID(spotifyLink)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid spotify link or ID"})
@@ -175,7 +181,8 @@ func (h *Handler) GeniusRedirect(c echo.Context) error {
 }
 
 func (h *Handler) YouTubeToSpotifyRedirect(c echo.Context) error {
-	youtubeLink := c.Param("youtube_link")
+	// Get everything after /yt/
+	youtubeLink := strings.TrimPrefix(c.Request().URL.Path, "/yt/")
 
 	videoID, err := utils.ExtractYouTubeVideoID(youtubeLink)
 	if err != nil || videoID == "" {
@@ -241,7 +248,8 @@ func (h *Handler) searchSpotifyByTitle(ctx context.Context, query string) (strin
 }
 
 func (h *Handler) SmartRedirect(c echo.Context) error {
-	link := c.Param("link")
+	// Get everything after the first /
+	link := strings.TrimPrefix(c.Request().URL.Path, "/")
 
 	linkType := utils.DetectLinkType(link)
 
@@ -362,28 +370,30 @@ func (h *Handler) handleSpotifyLink(c echo.Context, link string) error {
 }
 
 func (h *Handler) SmartLyricVideoRedirect(c echo.Context) error {
-	link := c.Param("link")
+	// Get everything after /ly/
+	link := strings.TrimPrefix(c.Request().URL.Path, "/ly/")
 	linkType := utils.DetectLinkType(link)
 
 	switch linkType {
 	case utils.LinkTypeYouTube:
 		return h.youtubeToLyricVideo(c, link)
 	case utils.LinkTypeSpotify:
-		return h.LyricVideoRedirect(c)
+		return h.spotifyToLyricVideo(c, link)
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid link format"})
 	}
 }
 
 func (h *Handler) SmartGeniusRedirect(c echo.Context) error {
-	link := c.Param("link")
+	// Get everything after /gn/
+	link := strings.TrimPrefix(c.Request().URL.Path, "/gn/")
 	linkType := utils.DetectLinkType(link)
 
 	switch linkType {
 	case utils.LinkTypeYouTube:
 		return h.youtubeToGenius(c, link)
 	case utils.LinkTypeSpotify:
-		return h.GeniusRedirect(c)
+		return h.spotifyToGenius(c, link)
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid link format"})
 	}
