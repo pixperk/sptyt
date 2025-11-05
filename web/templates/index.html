@@ -17,14 +17,14 @@
         <h2>How to Use</h2>
 
         <h3>Convert Spotify to YouTube</h3>
-        <p>Add your Spotify link after <code>sptyt.xyz/</code>:</p>
-        <p><code>sptyt.xyz/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8</code></p>
+        <p>Add your Spotify link after <code class="domain"></code>:</p>
+        <p><code class="example-url" data-path="/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8"></code></p>
         <p>Or just use the track ID:</p>
-        <p><code>sptyt.xyz/4PTG3Z6ehGkBFwjybzWkR8</code></p>
+        <p><code class="example-url" data-path="/4PTG3Z6ehGkBFwjybzWkR8"></code></p>
 
         <h3>Convert YouTube to Spotify</h3>
         <p>Works the same way with YouTube links:</p>
-        <p><code>sptyt.xyz/https://youtu.be/dQw4w9WgXcQ</code></p>
+        <p><code class="example-url" data-path="/https://youtu.be/dQw4w9WgXcQ"></code></p>
         <p>Supports all YouTube URL formats:</p>
         <ul>
             <li>Full URLs: <code>youtube.com/watch?v=...</code></li>
@@ -35,15 +35,15 @@
         <h3>Get Lyric Videos</h3>
         <p>Add <code>/ly/</code> before your link:</p>
         <ul>
-            <li>From Spotify: <code>sptyt.xyz/ly/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8</code></li>
-            <li>From YouTube: <code>sptyt.xyz/ly/https://youtu.be/dQw4w9WgXcQ</code></li>
+            <li>From Spotify: <code class="example-url" data-path="/ly/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8"></code></li>
+            <li>From YouTube: <code class="example-url" data-path="/ly/https://youtu.be/dQw4w9WgXcQ"></code></li>
         </ul>
 
         <h3>Get Genius Lyrics</h3>
         <p>Add <code>/gn/</code> before your link:</p>
         <ul>
-            <li>From Spotify: <code>sptyt.xyz/gn/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8</code></li>
-            <li>From YouTube: <code>sptyt.xyz/gn/https://youtu.be/dQw4w9WgXcQ</code></li>
+            <li>From Spotify: <code class="example-url" data-path="/gn/https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8"></code></li>
+            <li>From YouTube: <code class="example-url" data-path="/gn/https://youtu.be/dQw4w9WgXcQ"></code></li>
         </ul>
 
         <h2>Important Notes</h2>
@@ -73,5 +73,33 @@
         <h2>Rate Limits</h2>
         <p>60 requests per minute per IP address. If you exceed this, wait a minute and try again.</p>
     </div>
+
+    <script>
+        // Get the current domain
+        const domain = window.location.host;
+
+        // Update all domain placeholders
+        document.querySelectorAll('.domain').forEach(el => {
+            el.textContent = domain + '/';
+        });
+
+        // Update all example URLs and make them clickable to copy
+        document.querySelectorAll('.example-url').forEach(el => {
+            const path = el.getAttribute('data-path');
+            const fullUrl = domain + path;
+            el.textContent = fullUrl;
+            el.style.cursor = 'pointer';
+
+            el.onclick = () => {
+                navigator.clipboard.writeText(fullUrl).then(() => {
+                    const originalText = el.textContent;
+                    el.textContent = '✓ copied!';
+                    setTimeout(() => {
+                        el.textContent = originalText;
+                    }, 1500);
+                });
+            };
+        });
+    </script>
 </body>
 </html>

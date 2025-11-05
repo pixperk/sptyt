@@ -9,46 +9,52 @@ body {
     background: #0a0a0a;
     color: #e0e0e0;
     line-height: 1.7;
-    padding: 2rem 1rem;
+    padding: 1rem;
+    overflow-x: hidden;
 }
 
 .container {
     max-width: 800px;
     margin: 0 auto;
+    padding: 1rem;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
 }
 
 h1 {
-    font-size: 2.5rem;
+    font-size: 2rem;
     font-weight: 700;
     color: #fff;
     margin-bottom: 0.5rem;
 }
 
 h2 {
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     font-weight: 600;
     color: #fff;
-    margin-top: 2.5rem;
+    margin-top: 2rem;
     margin-bottom: 1rem;
 }
 
 h3 {
-    font-size: 1.3rem;
+    font-size: 1.2rem;
     font-weight: 600;
     color: #d0d0d0;
-    margin-top: 2rem;
+    margin-top: 1.5rem;
     margin-bottom: 0.8rem;
 }
 
 p, li {
     color: #c0c0c0;
     margin-bottom: 0.8rem;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
 }
 
 .subtitle {
-    font-size: 1.1rem;
+    font-size: 1rem;
     color: #999;
-    margin-bottom: 3rem;
+    margin-bottom: 2rem;
 }
 
 code {
@@ -57,7 +63,24 @@ code {
     border-radius: 4px;
     font-family: 'Courier New', monospace;
     color: #1db954;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+    display: inline-block;
+    max-width: 100%;
+    white-space: pre-wrap;
+    transition: background 0.2s, color 0.2s;
+}
+
+code.example-url:hover {
+    background: #2a2a2a;
+    color: #fff;
+}
+
+code.example-url:active {
+    background: #3a3a3a;
 }
 
 ul {
@@ -81,4 +104,62 @@ hr {
     border: none;
     border-top: 1px solid #333;
     margin: 3rem 0;
+}
+
+/* Desktop styles */
+@media (min-width: 768px) {
+    body {
+        padding: 2rem 1rem;
+    }
+
+    .container {
+        padding: 2rem;
+    }
+
+    h1 {
+        font-size: 2.5rem;
+    }
+
+    h2 {
+        font-size: 1.8rem;
+        margin-top: 2.5rem;
+    }
+
+    h3 {
+        font-size: 1.3rem;
+        margin-top: 2rem;
+    }
+
+    .subtitle {
+        font-size: 1.1rem;
+        margin-bottom: 3rem;
+    }
+
+    code {
+        font-size: 0.95rem;
+    }
+}
+
+/* Small mobile adjustments */
+@media (max-width: 480px) {
+    h1 {
+        font-size: 1.75rem;
+    }
+
+    h2 {
+        font-size: 1.3rem;
+    }
+
+    h3 {
+        font-size: 1.1rem;
+    }
+
+    code {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.4rem;
+    }
+
+    ul {
+        margin-left: 1rem;
+    }
 }
