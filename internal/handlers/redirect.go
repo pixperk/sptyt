@@ -181,8 +181,11 @@ func (h *Handler) spotifyToGenius(c echo.Context, spotifyLink string) error {
 }
 
 func (h *Handler) YouTubeToSpotifyRedirect(c echo.Context) error {
-	// Get everything after /yt/
+	// Get everything after /yt/ including query params
 	youtubeLink := strings.TrimPrefix(c.Request().URL.Path, "/yt/")
+	if c.Request().URL.RawQuery != "" {
+		youtubeLink = youtubeLink + "?" + c.Request().URL.RawQuery
+	}
 
 	videoID, err := utils.ExtractYouTubeVideoID(youtubeLink)
 	if err != nil || videoID == "" {
@@ -248,8 +251,11 @@ func (h *Handler) searchSpotifyByTitle(ctx context.Context, query string) (strin
 }
 
 func (h *Handler) SmartRedirect(c echo.Context) error {
-	// Get everything after the first /
+	// Get everything after the first / including query params
 	link := strings.TrimPrefix(c.Request().URL.Path, "/")
+	if c.Request().URL.RawQuery != "" {
+		link = link + "?" + c.Request().URL.RawQuery
+	}
 
 	linkType := utils.DetectLinkType(link)
 
@@ -370,8 +376,11 @@ func (h *Handler) handleSpotifyLink(c echo.Context, link string) error {
 }
 
 func (h *Handler) SmartLyricVideoRedirect(c echo.Context) error {
-	// Get everything after /ly/
+	// Get everything after /ly/ including query params
 	link := strings.TrimPrefix(c.Request().URL.Path, "/ly/")
+	if c.Request().URL.RawQuery != "" {
+		link = link + "?" + c.Request().URL.RawQuery
+	}
 	linkType := utils.DetectLinkType(link)
 
 	switch linkType {
@@ -385,8 +394,11 @@ func (h *Handler) SmartLyricVideoRedirect(c echo.Context) error {
 }
 
 func (h *Handler) SmartGeniusRedirect(c echo.Context) error {
-	// Get everything after /gn/
+	// Get everything after /gn/ including query params
 	link := strings.TrimPrefix(c.Request().URL.Path, "/gn/")
+	if c.Request().URL.RawQuery != "" {
+		link = link + "?" + c.Request().URL.RawQuery
+	}
 	linkType := utils.DetectLinkType(link)
 
 	switch linkType {
