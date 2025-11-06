@@ -58,6 +58,122 @@ p, li {
     margin-bottom: 2rem;
 }
 
+/* Redirect Form Styles */
+.redirect-form {
+    background: linear-gradient(135deg, #1a1a1a 0%, #161616 100%);
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 2.5rem;
+    margin: 3rem 0 3.5rem 0;
+    max-width: 100%;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+#linkInput {
+    width: 100%;
+    padding: 1rem 1.25rem;
+    background: #0a0a0a;
+    border: 2px solid #2a2a2a;
+    border-radius: 8px;
+    color: #e0e0e0;
+    font-family: 'Noto Serif Display', serif;
+    font-size: 1.05rem;
+    transition: all 0.3s ease;
+    margin-bottom: 0;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#linkInput:focus {
+    outline: none;
+    border-color: #33bbff;
+    background: #0d0d0d;
+    box-shadow: 0 0 0 3px rgba(51, 187, 255, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#linkInput::placeholder {
+    color: #555;
+}
+
+.form-row {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+}
+
+#redirectType {
+    flex: 1;
+    padding: 1rem 1.25rem;
+    background: #0a0a0a;
+    border: 2px solid #2a2a2a;
+    border-radius: 8px;
+    color: #e0e0e0;
+    font-family: 'Noto Serif Display', serif;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2333bbff' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    padding-right: 3rem;
+}
+
+#redirectType:focus {
+    outline: none;
+    border-color: #33bbff;
+    background-color: #0d0d0d;
+    box-shadow: 0 0 0 3px rgba(51, 187, 255, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#redirectType:hover {
+    border-color: #3a3a3a;
+}
+
+#redirectBtn {
+    padding: 1rem 2.5rem;
+    background: linear-gradient(135deg, #33bbff 0%, #2aa8e6 100%);
+    border: none;
+    border-radius: 8px;
+    color: #0a0a0a;
+    font-family: 'Noto Serif Display', serif;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(51, 187, 255, 0.3);
+    letter-spacing: 0.025em;
+}
+
+#redirectBtn:hover {
+    background: linear-gradient(135deg, #44ccff 0%, #3bb9f7 100%);
+    box-shadow: 0 6px 16px rgba(51, 187, 255, 0.4);
+    transform: translateY(-1px);
+}
+
+#redirectBtn:active {
+    transform: translateY(0) scale(0.98);
+    box-shadow: 0 2px 8px rgba(51, 187, 255, 0.3);
+}
+
+.detected-type {
+    display: none;
+    margin: 1.25rem 0 1rem 0;
+    padding: 0.875rem 1.25rem;
+    background: rgba(51, 187, 255, 0.08);
+    border: 1px solid rgba(51, 187, 255, 0.2);
+    border-radius: 6px;
+    color: #33bbff;
+    font-size: 0.95rem;
+    text-align: center;
+    font-weight: 500;
+    letter-spacing: 0.015em;
+}
+
+.form-row {
+    margin-top: 0;
+}
+
 code {
     background: #1a1a1a;
     padding: 0.2rem 0.5rem;
@@ -141,6 +257,29 @@ hr {
     }
 }
 
+/* Tablet adjustments */
+@media (max-width: 768px) {
+    .redirect-form {
+        padding: 2rem;
+        margin: 2.5rem 0;
+    }
+
+    #linkInput {
+        font-size: 1rem;
+        padding: 0.95rem 1.15rem;
+    }
+
+    #redirectType {
+        font-size: 0.95rem;
+        padding: 0.95rem 1.15rem;
+    }
+
+    #redirectBtn {
+        padding: 0.95rem 2rem;
+        font-size: 0.95rem;
+    }
+}
+
 /* Small mobile adjustments */
 @media (max-width: 480px) {
     h1 {
@@ -162,5 +301,41 @@ hr {
 
     ul {
         margin-left: 1rem;
+    }
+
+    .redirect-form {
+        padding: 1.5rem;
+        margin: 2rem 0;
+        border-radius: 10px;
+    }
+
+    #linkInput {
+        font-size: 0.95rem;
+        padding: 0.875rem 1rem;
+    }
+
+    .detected-type {
+        font-size: 0.85rem;
+        padding: 0.75rem 1rem;
+        margin: 1rem 0 0.875rem 0;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-top: 0;
+    }
+
+    #redirectType {
+        font-size: 0.9rem;
+        padding: 0.875rem 1rem;
+        padding-right: 2.5rem;
+        background-position: right 0.75rem center;
+    }
+
+    #redirectBtn {
+        width: 100%;
+        padding: 1rem;
+        font-size: 0.95rem;
     }
 }

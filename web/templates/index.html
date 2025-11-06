@@ -36,6 +36,17 @@
         <h1>sptyt</h1>
         <p class="subtitle">Redirect Music Links Instantly</p>
 
+        <div class="redirect-form">
+            <input type="text" id="linkInput" placeholder="Paste your Spotify or YouTube link..." />
+            <div id="detectedType" class="detected-type"></div>
+            <div class="form-row" id="redirectOptions" style="display: none;">
+                <select id="redirectType">
+                    <!-- Options will be populated dynamically -->
+                </select>
+                <button id="redirectBtn">Go</button>
+            </div>
+        </div>
+
         <h2>How to Use</h2>
 
         <h3>Redirect Spotify to YouTube</h3>
@@ -121,6 +132,113 @@
                     }, 1500);
                 });
             };
+        });
+
+        // Link detection and redirect functionality
+        const linkInput = document.getElementById('linkInput');
+        const redirectType = document.getElementById('redirectType');
+        const redirectBtn = document.getElementById('redirectBtn');
+        const detectedType = document.getElementById('detectedType');
+        const redirectOptions = document.getElementById('redirectOptions');
+
+        function detectLinkType(link) {
+            if (!link) return null;
+
+            // Spotify patterns
+            if (link.includes('spotify.com') || link.includes('open.spotify.com')) {
+                return 'spotify';
+            }
+
+            // YouTube patterns
+            if (link.includes('youtube.com') || link.includes('youtu.be') || link.includes('youtube.com/shorts')) {
+                return 'youtube';
+            }
+
+            // Check if it's just an ID (Spotify track IDs are 22 characters)
+            if (/^[a-zA-Z0-9]{22}$/.test(link.trim())) {
+                return 'spotify';
+            }
+
+            return null;
+        }
+
+        function populateOptions(type) {
+            redirectType.innerHTML = '';
+
+            if (type === 'spotify') {
+                // Spotify detected - show YouTube options
+                redirectType.innerHTML = `
+                    <option value="auto">YouTube Music Video</option>
+                    <option value="ly">YouTube Lyric Video</option>
+                    <option value="gn">Genius Lyrics</option>
+                `;
+            } else if (type === 'youtube') {
+                // YouTube detected - show Spotify options first
+                redirectType.innerHTML = `
+                    <option value="auto">Spotify</option>
+                    <option value="ly">YouTube Lyric Video</option>
+                    <option value="gn">Genius Lyrics</option>
+                `;
+            }
+        }
+
+        function updateDetectedType(type) {
+            if (type === 'spotify') {
+                detectedType.textContent = 'Spotify link detected';
+                detectedType.style.display = 'block';
+                detectedType.style.color = '#33bbff';
+                populateOptions('spotify');
+                redirectOptions.style.display = 'flex';
+            } else if (type === 'youtube') {
+                detectedType.textContent = 'YouTube link detected';
+                detectedType.style.display = 'block';
+                detectedType.style.color = '#33bbff';
+                populateOptions('youtube');
+                redirectOptions.style.display = 'flex';
+            } else {
+                detectedType.style.display = 'none';
+                redirectOptions.style.display = 'none';
+            }
+        }
+
+        linkInput.addEventListener('input', (e) => {
+            const type = detectLinkType(e.target.value);
+            updateDetectedType(type);
+        });
+
+        function handleRedirect() {
+            const link = linkInput.value.trim();
+            if (!link) return;
+
+            const type = detectLinkType(link);
+            if (!type) {
+                detectedType.textContent = '❌ Invalid link format';
+                detectedType.style.display = 'block';
+                detectedType.style.color = '#ff5555';
+                return;
+            }
+
+            const redirectValue = redirectType.value;
+            let prefix = '';
+
+            if (redirectValue === 'ly') {
+                prefix = '/ly/';
+            } else if (redirectValue === 'gn') {
+                prefix = '/gn/';
+            } else {
+                prefix = '/';
+            }
+
+            const redirectUrl = window.location.origin + prefix + link;
+            window.location.href = redirectUrl;
+        }
+
+        redirectBtn.addEventListener('click', handleRedirect);
+
+        linkInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleRedirect();
+            }
         });
     </script>
 </body>
