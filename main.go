@@ -8,7 +8,10 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/pixperk/sptyt/internal/auth"
 	"github.com/pixperk/sptyt/internal/cache"
+	"github.com/pixperk/sptyt/internal/config"
+	"github.com/pixperk/sptyt/internal/database"
 	"github.com/pixperk/sptyt/internal/genius"
 	"github.com/pixperk/sptyt/internal/handlers"
 	custommw "github.com/pixperk/sptyt/internal/middleware"
@@ -20,6 +23,13 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
+
+	// Initialize database configuration
+	cfg := config.NewConfig()
+	defer cfg.Close()
+
+	// Run database migrations
+	database.RunMigrations(cfg.DB)
 
 	spotifyClientID := os.Getenv("SPOTIFY_CLIENT_ID")
 	spotifyClientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
@@ -62,6 +72,7 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(rateLimiter.Middleware())
 	e.Use(custommw.MobileAppRedirect())
+	e.Use(middleware.CORS())
 
 	// Static files
 	e.Static("/static", "web/static")
@@ -69,16 +80,34 @@ func main() {
 	// Home page
 	e.GET("/", handler.Home)
 
-	// API routes
+	// Public API routes (free tier - no auth required)
 	e.GET("/ly/:link", handler.SmartLyricVideoRedirect)
 	e.GET("/gn/:link", handler.SmartGeniusRedirect)
 	e.GET("/yt/:youtube_link", handler.YouTubeToSpotifyRedirect)
 	e.GET("/:link", handler.SmartRedirect)
+
+	// Protected API routes (require Clerk authentication)
+	if cfg.ClerkSecretKey != "" {
+		clerkMiddleware := auth.NewClerkMiddleware(cfg.ClerkSecretKey)
+		protectedHandler := handlers.NewProtectedHandler(handler, cfg.DB)
+
+		// Create protected API group
+		api := e.Group("/api")
+		api.Use(clerkMiddleware.RequireAuth())
+
+		// User endpoint
+		api.GET("/me", protectedHandler.Me)
+
+		log.Println("Clerk authentication enabled - /api/me route available")
+	} else {
+		log.Println("Clerk not configured - protected routes disabled")
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
+	log.Printf("Server starting on port %s", port)
 	e.Logger.Fatal(e.Start(":" + port))
 }
