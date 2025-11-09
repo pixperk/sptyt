@@ -280,3 +280,62 @@ func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
 		"access_until": user.SubscriptionEndsAt,
 	})
 }
+
+// PaymentReturn handles the redirect after payment completion
+func (ph *ProtectedHandler) PaymentReturn(c echo.Context) error {
+	// Get query parameters from the redirect
+	sessionID := c.QueryParam("session_id")
+	status := c.QueryParam("status")                   // From DodoPay redirect (e.g., "active")
+	subscriptionID := c.QueryParam("subscription_id") // From DodoPay redirect
+
+	log.Printf("PaymentReturn: session_id=%s, status=%s, subscription_id=%s",
+		sessionID, status, subscriptionID)
+
+	// Get the authenticated user
+	user, err := ph.GetOrCreateUser(c)
+	if err != nil {
+		return err
+	}
+
+	// Fetch the latest user data from database to check if webhook updated it
+	ctx := context.Background()
+	var freshUser models.User
+	err = ph.db.NewSelect().
+		Model(&freshUser).
+		Where("id = ?", user.ID).
+		Scan(ctx)
+
+	if err != nil {
+		log.Printf("PaymentReturn: Failed to fetch user: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch user data")
+	}
+
+	// Determine payment status based on query params and database state
+	paymentStatus := "pending"
+	message := "Payment is being processed. Your subscription will be activated shortly."
+
+	if status == "active" || (freshUser.SubscriptionStatus == "active" && freshUser.SubscriptionTier == "premium") {
+		paymentStatus = "success"
+		message = "Payment successful! Your premium subscription is now active."
+	} else if status == "cancelled" || status == "failed" {
+		paymentStatus = "failed"
+		message = "Payment was not completed. Please try again."
+	}
+
+	log.Printf("PaymentReturn: user_id=%s, payment_status=%s, db_subscription_status=%s, subscription_tier=%s",
+		freshUser.ID, paymentStatus, freshUser.SubscriptionStatus, freshUser.SubscriptionTier)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  paymentStatus,
+		"message": message,
+		"session_id": sessionID,
+		"subscription_id": subscriptionID,
+		"user": map[string]interface{}{
+			"email":               freshUser.Email,
+			"subscription_tier":   freshUser.SubscriptionTier,
+			"subscription_status": freshUser.SubscriptionStatus,
+			"subscription_ends_at": freshUser.SubscriptionEndsAt,
+			"is_premium":          freshUser.IsPremium(),
+		},
+	})
+}

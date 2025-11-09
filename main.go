@@ -103,6 +103,7 @@ func main() {
 		api.GET("/me", protectedHandler.Me)
 		api.POST("/checkout", protectedHandler.CreateCheckoutSession)
 		api.POST("/subscription/cancel", protectedHandler.CancelSubscription)
+		api.GET("/payment/return", protectedHandler.PaymentReturn)
 
 		log.Println("Clerk authentication enabled - /api/me route available")
 	} else {
