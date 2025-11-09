@@ -76,15 +76,18 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 
 	log.Println("DodoPayWebhook: Signature verified successfully")
 
-	// Parse webhook event
+	// Parse webhook event - DodoPay structure
 	var event struct {
 		Type string `json:"type"`
 		Data struct {
-			SubscriptionID   string `json:"subscription_id"`
-			CustomerEmail    string `json:"customer_email"`
+			SubscriptionID string `json:"subscription_id"`
+			Customer       struct {
+				Email string `json:"email"`
+			} `json:"customer"`
 			Status           string `json:"status"`
-			PlanID           string `json:"plan_id"`
-			CurrentPeriodEnd int64  `json:"current_period_end"`
+			ProductID        string `json:"product_id"`
+			NextBillingDate  string `json:"next_billing_date"`
+			ExpiresAt        string `json:"expires_at"`
 		} `json:"data"`
 	}
 
@@ -94,7 +97,24 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 	}
 
 	log.Printf("DodoPayWebhook: Event type: %s, Subscription ID: %s, Customer: %s",
-		event.Type, event.Data.SubscriptionID, event.Data.CustomerEmail)
+		event.Type, event.Data.SubscriptionID, event.Data.Customer.Email)
+
+	// Parse next_billing_date to Unix timestamp
+	var nextBillingTimestamp int64
+	if event.Data.NextBillingDate != "" {
+		t, err := time.Parse(time.RFC3339, event.Data.NextBillingDate)
+		if err == nil {
+			nextBillingTimestamp = t.Unix()
+		}
+	}
+
+	// Fallback to expires_at if next_billing_date is not available
+	if nextBillingTimestamp == 0 && event.Data.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, event.Data.ExpiresAt)
+		if err == nil {
+			nextBillingTimestamp = t.Unix()
+		}
+	}
 
 	ctx := context.Background()
 
@@ -102,7 +122,7 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 	switch event.Type {
 	// Subscription events
 	case "subscription.active":
-		return wh.handleSubscriptionActive(ctx, c, event.Data.CustomerEmail, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handleSubscriptionActive(ctx, c, event.Data.Customer.Email, event.Data.SubscriptionID, nextBillingTimestamp)
 
 	case "subscription.cancelled":
 		return wh.handleSubscriptionCancelled(ctx, c, event.Data.SubscriptionID)
@@ -117,10 +137,10 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 		return wh.handleSubscriptionOnHold(ctx, c, event.Data.SubscriptionID)
 
 	case "subscription.plan_changed":
-		return wh.handleSubscriptionPlanChanged(ctx, c, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handleSubscriptionPlanChanged(ctx, c, event.Data.SubscriptionID, nextBillingTimestamp)
 
 	case "subscription.renewed":
-		return wh.handleSubscriptionRenewed(ctx, c, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handleSubscriptionRenewed(ctx, c, event.Data.SubscriptionID, nextBillingTimestamp)
 
 	// Payment events
 	case "payment.cancelled":
@@ -133,7 +153,7 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 		return wh.handlePaymentProcessing(ctx, c, event.Data.SubscriptionID)
 
 	case "payment.succeeded":
-		return wh.handlePaymentSucceeded(ctx, c, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handlePaymentSucceeded(ctx, c, event.Data.SubscriptionID, nextBillingTimestamp)
 
 	default:
 		log.Printf("Unknown webhook event type: %s", event.Type)
