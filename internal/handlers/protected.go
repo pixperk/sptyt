@@ -168,11 +168,12 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 
 	// Get DodoPay configuration
 	dodopayAPIKey := os.Getenv("DODOPAY_API_KEY")
+	dodopayAPIHost := os.Getenv("DODOPAY_API_HOST")
 	productID := os.Getenv("DODOPAY_PRODUCT_ID")
 	returnURL := os.Getenv("DODOPAY_RETURN_URL")
 
-	log.Printf("CreateCheckoutSession: Config check - API Key exists: %v, Product ID exists: %v, Return URL exists: %v",
-		dodopayAPIKey != "", productID != "", returnURL != "")
+	log.Printf("CreateCheckoutSession: Config check - API Key exists: %v, API Host: %s, Product ID exists: %v, Return URL exists: %v",
+		dodopayAPIKey != "", dodopayAPIHost, productID != "", returnURL != "")
 
 	if dodopayAPIKey == "" || productID == "" {
 		log.Println("CreateCheckoutSession: Missing DodoPay configuration")
@@ -180,15 +181,23 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 	}
 
 	if returnURL == "" {
-		returnURL = "https://yourdomain.com/payment/return"
+		returnURL = "https://sptyt.xyz/payment/return"
 		log.Printf("CreateCheckoutSession: Using default return URL: %s", returnURL)
 	}
 
 	// Initialize DodoPay client
 	log.Println("CreateCheckoutSession: Initializing DodoPay client")
-	client := dodopayments.NewClient(
-		option.WithBearerToken(dodopayAPIKey),
-	)
+
+	var clientOptions []option.RequestOption
+	clientOptions = append(clientOptions, option.WithBearerToken(dodopayAPIKey))
+
+	// Use custom API host if provided
+	if dodopayAPIHost != "" {
+		log.Printf("CreateCheckoutSession: Using custom API host: %s", dodopayAPIHost)
+		clientOptions = append(clientOptions, option.WithBaseURL(dodopayAPIHost))
+	}
+
+	client := dodopayments.NewClient(clientOptions...)
 
 	ctx := context.Background()
 
@@ -274,7 +283,7 @@ func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message": "Subscription cancelled successfully",
+		"message":      "Subscription cancelled successfully",
 		"access_until": user.SubscriptionEndsAt,
 	})
 }
