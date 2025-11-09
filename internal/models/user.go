@@ -13,7 +13,6 @@ type User struct {
 	ID              uuid.UUID `bun:"type:uuid,pk,default:gen_random_uuid()" json:"id"`
 	ClerkID         string    `bun:",unique,notnull" json:"clerk_id"`
 	Email           string    `bun:",unique,notnull" json:"email"`
-	Username        string    `bun:",unique" json:"username,omitempty"`
 	FirstName       string    `bun:"" json:"first_name"`
 	LastName        string    `bun:"" json:"last_name"`
 	ProfileImageURL string    `bun:"" json:"profile_image_url"`

@@ -73,12 +73,6 @@ func (ph *ProtectedHandler) GetOrCreateUser(c echo.Context) (*models.User, error
 		}
 	}
 
-	// Extract username
-	username := ""
-	if clerkUser.Username != nil {
-		username = *clerkUser.Username
-	}
-
 	// Extract profile image
 	profileImageURL := ""
 	if clerkUser.ImageURL != nil {
@@ -101,7 +95,6 @@ func (ph *ProtectedHandler) GetOrCreateUser(c echo.Context) (*models.User, error
 		ID:                 uuid.New(),
 		ClerkID:            clerkUserID,
 		Email:              email,
-		Username:           username,
 		FirstName:          firstName,
 		LastName:           lastName,
 		ProfileImageURL:    profileImageURL,

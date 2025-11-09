@@ -38,5 +38,13 @@ func RunMigrations(db *bun.DB) {
 		log.Fatalf("Failed to create indexes: %v", err)
 	}
 
+	// Drop username column if it exists (cleanup migration)
+	_, err = db.Exec("ALTER TABLE users DROP COLUMN IF EXISTS username")
+	if err != nil {
+		log.Printf("Warning: Failed to drop username column: %v", err)
+	} else {
+		log.Println("Dropped username column from users table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }
