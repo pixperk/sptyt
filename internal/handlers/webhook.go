@@ -27,33 +27,16 @@ func NewWebhookHandler(db *bun.DB) *WebhookHandler {
 func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 	log.Println("DodoPayWebhook: Received webhook")
 
-	// Debug: Log all headers
-	log.Println("DodoPayWebhook: All headers:")
-	for name, values := range c.Request().Header {
-		log.Printf("  %s: %v", name, values)
-	}
+	// Get Standard Webhooks headers (DodoPay uses Standard Webhooks spec)
+	webhookID := c.Request().Header.Get("webhook-id")
+	webhookTimestamp := c.Request().Header.Get("webhook-timestamp")
+	webhookSignature := c.Request().Header.Get("webhook-signature")
 
-	// Get Svix headers (try both lowercase and canonical case)
-	svixID := c.Request().Header.Get("svix-id")
-	if svixID == "" {
-		svixID = c.Request().Header.Get("Svix-Id")
-	}
+	log.Printf("DodoPayWebhook: Headers - webhook-id: %s, webhook-timestamp: %s, webhook-signature exists: %v",
+		webhookID, webhookTimestamp, webhookSignature != "")
 
-	svixTimestamp := c.Request().Header.Get("svix-timestamp")
-	if svixTimestamp == "" {
-		svixTimestamp = c.Request().Header.Get("Svix-Timestamp")
-	}
-
-	svixSignature := c.Request().Header.Get("svix-signature")
-	if svixSignature == "" {
-		svixSignature = c.Request().Header.Get("Svix-Signature")
-	}
-
-	log.Printf("DodoPayWebhook: Headers - svix-id: %s, svix-timestamp: %s, svix-signature exists: %v",
-		svixID, svixTimestamp, svixSignature != "")
-
-	if svixID == "" || svixTimestamp == "" || svixSignature == "" {
-		log.Println("DodoPayWebhook: Missing Svix headers")
+	if webhookID == "" || webhookTimestamp == "" || webhookSignature == "" {
+		log.Println("DodoPayWebhook: Missing webhook headers")
 		return echo.NewHTTPError(http.StatusUnauthorized, "Missing webhook headers")
 	}
 
@@ -66,7 +49,7 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 
 	log.Printf("DodoPayWebhook: Received payload: %s", string(body))
 
-	// Verify signature using Svix
+	// Verify signature using Standard Webhooks (svix library implements this spec)
 	webhookSecret := os.Getenv("DODOPAY_WEBHOOK_SECRET")
 	if webhookSecret == "" {
 		log.Println("DodoPayWebhook: WARNING - No webhook secret configured")
@@ -75,14 +58,15 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 
 	wh_verify, err := svix.NewWebhook(webhookSecret)
 	if err != nil {
-		log.Printf("DodoPayWebhook: Failed to create Svix webhook verifier: %v", err)
+		log.Printf("DodoPayWebhook: Failed to create webhook verifier: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Webhook verification setup failed")
 	}
 
+	// Standard Webhooks uses webhook-* headers
 	headers := http.Header{}
-	headers.Set("svix-id", svixID)
-	headers.Set("svix-timestamp", svixTimestamp)
-	headers.Set("svix-signature", svixSignature)
+	headers.Set("webhook-id", webhookID)
+	headers.Set("webhook-timestamp", webhookTimestamp)
+	headers.Set("webhook-signature", webhookSignature)
 
 	err = wh_verify.Verify(body, headers)
 	if err != nil {
