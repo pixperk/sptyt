@@ -4,9 +4,12 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/clerk/clerk-sdk-go/v2/user"
+	dodopayments "github.com/dodopayments/dodopayments-go"
+	"github.com/dodopayments/dodopayments-go/option"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
@@ -125,6 +128,9 @@ func (ph *ProtectedHandler) Me(c echo.Context) error {
 		return err
 	}
 
+	// Store user in context for other middlewares
+	c.Set("current_user", user)
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"user": user,
 		"subscription": map[string]interface{}{
@@ -133,5 +139,124 @@ func (ph *ProtectedHandler) Me(c echo.Context) error {
 			"expires_at": user.SubscriptionEndsAt,
 			"is_premium": user.IsPremium(),
 		},
+	})
+}
+
+// CreateCheckoutSession creates a DodoPay checkout session for subscription
+func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
+	user, err := ph.GetOrCreateUser(c)
+	if err != nil {
+		return err
+	}
+
+	// Store user in context
+	c.Set("current_user", user)
+
+	// Parse payment method from request
+	var requestBody struct {
+		PaymentMethod string `json:"payment_method"` // "card" or "upi"
+	}
+	if err := c.Bind(&requestBody); err != nil {
+		requestBody.PaymentMethod = "card" // Default to card
+	}
+
+	// Get DodoPay configuration
+	dodopayAPIKey := os.Getenv("DODOPAY_API_KEY")
+	productID := os.Getenv("DODOPAY_PRODUCT_ID")
+	returnURL := os.Getenv("DODOPAY_RETURN_URL")
+	if dodopayAPIKey == "" || productID == "" {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "Payment system not configured")
+	}
+
+	if returnURL == "" {
+		returnURL = "https://yourdomain.com/payment/return"
+	}
+
+	// Initialize DodoPay client
+	client := dodopayments.NewClient(
+		option.WithBearerToken(dodopayAPIKey),
+	)
+
+	ctx := context.Background()
+
+	// Determine allowed payment methods based on request
+	allowedPaymentMethods := []dodopayments.PaymentMethodTypes{
+		dodopayments.PaymentMethodTypesCredit,
+		dodopayments.PaymentMethodTypesDebit,
+	}
+
+	// Add UPI payment methods if requested
+	if requestBody.PaymentMethod == "upi" {
+		allowedPaymentMethods = append(allowedPaymentMethods,
+			dodopayments.PaymentMethodTypesUpiCollect,
+			dodopayments.PaymentMethodTypesUpiIntent,
+		)
+	}
+
+	// Create customer name
+	customerName := user.FirstName + " " + user.LastName
+	if customerName == " " {
+		customerName = user.Email
+	}
+
+	// Create checkout session with product
+	session, err := client.CheckoutSessions.New(ctx, dodopayments.CheckoutSessionNewParams{
+		CheckoutSessionRequest: dodopayments.CheckoutSessionRequestParam{
+			ProductCart: dodopayments.F([]dodopayments.CheckoutSessionRequestProductCartParam{{
+				ProductID: dodopayments.F(productID),
+				Quantity:  dodopayments.F(int64(1)),
+			}}),
+			ReturnURL: dodopayments.F(returnURL),
+			Customer: dodopayments.F[dodopayments.CustomerRequestUnionParam](dodopayments.CustomerRequestParam{
+				Email: dodopayments.F(user.Email),
+				Name:  dodopayments.F(customerName),
+			}),
+			AllowedPaymentMethodTypes: dodopayments.F(allowedPaymentMethods),
+		},
+	})
+
+	if err != nil {
+		log.Printf("Failed to create checkout session: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create checkout session")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"checkout_url":   session.CheckoutURL,
+		"session_id":     session.SessionID,
+		"payment_method": requestBody.PaymentMethod,
+		"message":        "Checkout session created. Supports both Card and UPI payments.",
+	})
+}
+
+// CancelSubscription cancels the user's subscription
+func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
+	user, err := ph.GetOrCreateUser(c)
+	if err != nil {
+		return err
+	}
+
+	if user.SubscriptionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "No active subscription")
+	}
+
+	// TODO: Call DodoPay API to cancel subscription
+	// For now, just mark as cancelled in database
+
+	ctx := context.Background()
+	_, err = ph.db.NewUpdate().
+		Model(user).
+		Set("subscription_status = ?", "cancelled").
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", user.ID).
+		Exec(ctx)
+
+	if err != nil {
+		log.Printf("Failed to cancel subscription: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to cancel subscription")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Subscription cancelled successfully",
+		"access_until": user.SubscriptionEndsAt,
 	})
 }

@@ -86,6 +86,10 @@ func main() {
 	e.GET("/yt/:youtube_link", handler.YouTubeToSpotifyRedirect)
 	e.GET("/:link", handler.SmartRedirect)
 
+	// Webhook routes (no auth required - verified by signature)
+	webhookHandler := handlers.NewWebhookHandler(cfg.DB)
+	e.POST("/webhooks/dodopay", webhookHandler.DodoPayWebhook)
+
 	// Protected API routes (require Clerk authentication)
 	if cfg.ClerkSecretKey != "" {
 		clerkMiddleware := auth.NewClerkMiddleware(cfg.ClerkSecretKey)
@@ -95,8 +99,10 @@ func main() {
 		api := e.Group("/api")
 		api.Use(clerkMiddleware.RequireAuth())
 
-		// User endpoint
+		// User endpoints
 		api.GET("/me", protectedHandler.Me)
+		api.POST("/checkout", protectedHandler.CreateCheckoutSession)
+		api.POST("/subscription/cancel", protectedHandler.CancelSubscription)
 
 		log.Println("Clerk authentication enabled - /api/me route available")
 	} else {
