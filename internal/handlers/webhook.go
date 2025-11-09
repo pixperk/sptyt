@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/models"
+	svix "github.com/svix/svix-webhooks/go"
 	"github.com/uptrace/bun"
 )
 
@@ -26,40 +25,75 @@ func NewWebhookHandler(db *bun.DB) *WebhookHandler {
 
 // DodoPayWebhook handles webhook events from DodoPay
 func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
-	// Verify webhook signature
-	signature := c.Request().Header.Get("X-DodoPay-Signature")
-	if signature == "" {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Missing signature")
+	log.Println("DodoPayWebhook: Received webhook")
+
+	// Get Svix headers
+	svixID := c.Request().Header.Get("svix-id")
+	svixTimestamp := c.Request().Header.Get("svix-timestamp")
+	svixSignature := c.Request().Header.Get("svix-signature")
+
+	log.Printf("DodoPayWebhook: Headers - svix-id: %s, svix-timestamp: %s, svix-signature exists: %v",
+		svixID, svixTimestamp, svixSignature != "")
+
+	if svixID == "" || svixTimestamp == "" || svixSignature == "" {
+		log.Println("DodoPayWebhook: Missing Svix headers")
+		return echo.NewHTTPError(http.StatusUnauthorized, "Missing webhook headers")
 	}
 
 	// Read raw body
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
+		log.Printf("DodoPayWebhook: Failed to read body: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "Failed to read body")
 	}
 
-	// Verify signature
+	log.Printf("DodoPayWebhook: Received payload: %s", string(body))
+
+	// Verify signature using Svix
 	webhookSecret := os.Getenv("DODOPAY_WEBHOOK_SECRET")
-	if !verifySignature(body, signature, webhookSecret) {
-		log.Printf("Invalid webhook signature")
+	if webhookSecret == "" {
+		log.Println("DodoPayWebhook: WARNING - No webhook secret configured")
+		return echo.NewHTTPError(http.StatusInternalServerError, "Webhook secret not configured")
+	}
+
+	wh_verify, err := svix.NewWebhook(webhookSecret)
+	if err != nil {
+		log.Printf("DodoPayWebhook: Failed to create Svix webhook verifier: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Webhook verification setup failed")
+	}
+
+	headers := http.Header{}
+	headers.Set("svix-id", svixID)
+	headers.Set("svix-timestamp", svixTimestamp)
+	headers.Set("svix-signature", svixSignature)
+
+	err = wh_verify.Verify(body, headers)
+	if err != nil {
+		log.Printf("DodoPayWebhook: Signature verification failed: %v", err)
 		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid signature")
 	}
+
+	log.Println("DodoPayWebhook: Signature verified successfully")
 
 	// Parse webhook event
 	var event struct {
 		Type string `json:"type"`
 		Data struct {
-			SubscriptionID string `json:"subscription_id"`
-			CustomerEmail  string `json:"customer_email"`
-			Status         string `json:"status"`
-			PlanID         string `json:"plan_id"`
-			CurrentPeriodEnd int64 `json:"current_period_end"`
+			SubscriptionID   string `json:"subscription_id"`
+			CustomerEmail    string `json:"customer_email"`
+			Status           string `json:"status"`
+			PlanID           string `json:"plan_id"`
+			CurrentPeriodEnd int64  `json:"current_period_end"`
 		} `json:"data"`
 	}
 
-	if err := c.Bind(&event); err != nil {
+	if err := json.Unmarshal(body, &event); err != nil {
+		log.Printf("DodoPayWebhook: Failed to parse JSON: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid JSON")
 	}
+
+	log.Printf("DodoPayWebhook: Event type: %s, Subscription ID: %s, Customer: %s",
+		event.Type, event.Data.SubscriptionID, event.Data.CustomerEmail)
 
 	ctx := context.Background()
 
@@ -67,38 +101,38 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 	switch event.Type {
 	// Subscription events
 	case "subscription.active":
-		return wh.handleSubscriptionActive(ctx, event.Data.CustomerEmail, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handleSubscriptionActive(ctx, c, event.Data.CustomerEmail, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
 
 	case "subscription.cancelled":
-		return wh.handleSubscriptionCancelled(ctx, event.Data.SubscriptionID)
+		return wh.handleSubscriptionCancelled(ctx, c, event.Data.SubscriptionID)
 
 	case "subscription.expired":
-		return wh.handleSubscriptionExpired(ctx, event.Data.SubscriptionID)
+		return wh.handleSubscriptionExpired(ctx, c, event.Data.SubscriptionID)
 
 	case "subscription.failed":
-		return wh.handleSubscriptionFailed(ctx, event.Data.SubscriptionID)
+		return wh.handleSubscriptionFailed(ctx, c, event.Data.SubscriptionID)
 
 	case "subscription.on_hold":
-		return wh.handleSubscriptionOnHold(ctx, event.Data.SubscriptionID)
+		return wh.handleSubscriptionOnHold(ctx, c, event.Data.SubscriptionID)
 
 	case "subscription.plan_changed":
-		return wh.handleSubscriptionPlanChanged(ctx, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handleSubscriptionPlanChanged(ctx, c, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
 
 	case "subscription.renewed":
-		return wh.handleSubscriptionRenewed(ctx, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handleSubscriptionRenewed(ctx, c, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
 
 	// Payment events
 	case "payment.cancelled":
-		return wh.handlePaymentCancelled(ctx, event.Data.SubscriptionID)
+		return wh.handlePaymentCancelled(ctx, c, event.Data.SubscriptionID)
 
 	case "payment.failed":
-		return wh.handlePaymentFailed(ctx, event.Data.SubscriptionID)
+		return wh.handlePaymentFailed(ctx, c, event.Data.SubscriptionID)
 
 	case "payment.processing":
-		return wh.handlePaymentProcessing(ctx, event.Data.SubscriptionID)
+		return wh.handlePaymentProcessing(ctx, c, event.Data.SubscriptionID)
 
 	case "payment.succeeded":
-		return wh.handlePaymentSucceeded(ctx, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
+		return wh.handlePaymentSucceeded(ctx, c, event.Data.SubscriptionID, event.Data.CurrentPeriodEnd)
 
 	default:
 		log.Printf("Unknown webhook event type: %s", event.Type)
@@ -106,7 +140,7 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 	}
 }
 
-func (wh *WebhookHandler) handleSubscriptionActive(ctx context.Context, email, subscriptionID string, periodEnd int64) error {
+func (wh *WebhookHandler) handleSubscriptionActive(ctx context.Context, c echo.Context, email, subscriptionID string, periodEnd int64) error {
 	log.Printf("Subscription active: %s for %s", subscriptionID, email)
 
 	// Find user by email
@@ -118,7 +152,7 @@ func (wh *WebhookHandler) handleSubscriptionActive(ctx context.Context, email, s
 
 	if err != nil {
 		log.Printf("User not found for email %s: %v", email, err)
-		return nil // Don't fail webhook
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	// Update user subscription
@@ -135,14 +169,14 @@ func (wh *WebhookHandler) handleSubscriptionActive(ctx context.Context, email, s
 
 	if err != nil {
 		log.Printf("Failed to update user subscription: %v", err)
-		return nil
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
 	log.Printf("User %s upgraded to premium", user.Email)
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handleSubscriptionCancelled(ctx context.Context, subscriptionID string) error {
+func (wh *WebhookHandler) handleSubscriptionCancelled(ctx context.Context, c echo.Context, subscriptionID string) error {
 	log.Printf("Subscription cancelled: %s", subscriptionID)
 
 	var user models.User
@@ -153,7 +187,7 @@ func (wh *WebhookHandler) handleSubscriptionCancelled(ctx context.Context, subsc
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	_, err = wh.db.NewUpdate().
@@ -165,12 +199,13 @@ func (wh *WebhookHandler) handleSubscriptionCancelled(ctx context.Context, subsc
 
 	if err != nil {
 		log.Printf("Failed to cancel subscription: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handleSubscriptionExpired(ctx context.Context, subscriptionID string) error {
+func (wh *WebhookHandler) handleSubscriptionExpired(ctx context.Context, c echo.Context, subscriptionID string) error {
 	log.Printf("Subscription expired: %s", subscriptionID)
 
 	var user models.User
@@ -181,7 +216,7 @@ func (wh *WebhookHandler) handleSubscriptionExpired(ctx context.Context, subscri
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	_, err = wh.db.NewUpdate().
@@ -194,13 +229,14 @@ func (wh *WebhookHandler) handleSubscriptionExpired(ctx context.Context, subscri
 
 	if err != nil {
 		log.Printf("Failed to downgrade user: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
 	log.Printf("User %s downgraded to free tier", user.Email)
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handlePaymentSucceeded(ctx context.Context, subscriptionID string, periodEnd int64) error {
+func (wh *WebhookHandler) handlePaymentSucceeded(ctx context.Context, c echo.Context, subscriptionID string, periodEnd int64) error {
 	log.Printf("Payment succeeded for subscription: %s", subscriptionID)
 
 	var user models.User
@@ -211,7 +247,7 @@ func (wh *WebhookHandler) handlePaymentSucceeded(ctx context.Context, subscripti
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	expiresAt := time.Unix(periodEnd, 0)
@@ -225,12 +261,13 @@ func (wh *WebhookHandler) handlePaymentSucceeded(ctx context.Context, subscripti
 
 	if err != nil {
 		log.Printf("Failed to update subscription: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handlePaymentFailed(ctx context.Context, subscriptionID string) error {
+func (wh *WebhookHandler) handlePaymentFailed(ctx context.Context, c echo.Context, subscriptionID string) error {
 	log.Printf("Payment failed for subscription: %s", subscriptionID)
 
 	var user models.User
@@ -241,7 +278,7 @@ func (wh *WebhookHandler) handlePaymentFailed(ctx context.Context, subscriptionI
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	// Mark as payment_failed but don't downgrade immediately
@@ -255,12 +292,13 @@ func (wh *WebhookHandler) handlePaymentFailed(ctx context.Context, subscriptionI
 
 	if err != nil {
 		log.Printf("Failed to update subscription status: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handleSubscriptionFailed(ctx context.Context, subscriptionID string) error {
+func (wh *WebhookHandler) handleSubscriptionFailed(ctx context.Context, c echo.Context, subscriptionID string) error {
 	log.Printf("Subscription failed: %s", subscriptionID)
 
 	var user models.User
@@ -271,7 +309,7 @@ func (wh *WebhookHandler) handleSubscriptionFailed(ctx context.Context, subscrip
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	_, err = wh.db.NewUpdate().
@@ -283,12 +321,13 @@ func (wh *WebhookHandler) handleSubscriptionFailed(ctx context.Context, subscrip
 
 	if err != nil {
 		log.Printf("Failed to update subscription status: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handleSubscriptionOnHold(ctx context.Context, subscriptionID string) error {
+func (wh *WebhookHandler) handleSubscriptionOnHold(ctx context.Context, c echo.Context, subscriptionID string) error {
 	log.Printf("Subscription on hold: %s", subscriptionID)
 
 	var user models.User
@@ -299,7 +338,7 @@ func (wh *WebhookHandler) handleSubscriptionOnHold(ctx context.Context, subscrip
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	_, err = wh.db.NewUpdate().
@@ -311,12 +350,13 @@ func (wh *WebhookHandler) handleSubscriptionOnHold(ctx context.Context, subscrip
 
 	if err != nil {
 		log.Printf("Failed to update subscription status: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handleSubscriptionPlanChanged(ctx context.Context, subscriptionID string, periodEnd int64) error {
+func (wh *WebhookHandler) handleSubscriptionPlanChanged(ctx context.Context, c echo.Context, subscriptionID string, periodEnd int64) error {
 	log.Printf("Subscription plan changed: %s", subscriptionID)
 
 	var user models.User
@@ -327,7 +367,7 @@ func (wh *WebhookHandler) handleSubscriptionPlanChanged(ctx context.Context, sub
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	expiresAt := time.Unix(periodEnd, 0)
@@ -340,12 +380,13 @@ func (wh *WebhookHandler) handleSubscriptionPlanChanged(ctx context.Context, sub
 
 	if err != nil {
 		log.Printf("Failed to update subscription: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handleSubscriptionRenewed(ctx context.Context, subscriptionID string, periodEnd int64) error {
+func (wh *WebhookHandler) handleSubscriptionRenewed(ctx context.Context, c echo.Context, subscriptionID string, periodEnd int64) error {
 	log.Printf("Subscription renewed: %s", subscriptionID)
 
 	var user models.User
@@ -356,7 +397,7 @@ func (wh *WebhookHandler) handleSubscriptionRenewed(ctx context.Context, subscri
 
 	if err != nil {
 		log.Printf("User not found for subscription %s: %v", subscriptionID, err)
-		return nil
+		return c.JSON(http.StatusOK, map[string]string{"status": "user_not_found"})
 	}
 
 	expiresAt := time.Unix(periodEnd, 0)
@@ -370,32 +411,25 @@ func (wh *WebhookHandler) handleSubscriptionRenewed(ctx context.Context, subscri
 
 	if err != nil {
 		log.Printf("Failed to renew subscription: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "database_update_failed"})
 	}
 
 	log.Printf("User subscription %s renewed until %v", subscriptionID, expiresAt)
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (wh *WebhookHandler) handlePaymentCancelled(ctx context.Context, subscriptionID string) error {
+func (wh *WebhookHandler) handlePaymentCancelled(ctx context.Context, c echo.Context, subscriptionID string) error {
 	log.Printf("Payment cancelled for subscription: %s", subscriptionID)
 
 	// Payment was cancelled during processing
 	// No immediate action needed - user can retry
-	return nil
+	return c.JSON(http.StatusOK, map[string]string{"status": "no_action"})
 }
 
-func (wh *WebhookHandler) handlePaymentProcessing(ctx context.Context, subscriptionID string) error {
+func (wh *WebhookHandler) handlePaymentProcessing(ctx context.Context, c echo.Context, subscriptionID string) error {
 	log.Printf("Payment processing for subscription: %s", subscriptionID)
 
 	// Payment is being processed
 	// No immediate action needed - wait for success or failure
-	return nil
-}
-
-// verifySignature verifies the webhook signature from DodoPay
-func verifySignature(payload []byte, signature, secret string) bool {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(payload)
-	expectedSignature := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(signature), []byte(expectedSignature))
+	return c.JSON(http.StatusOK, map[string]string{"status": "no_action"})
 }
