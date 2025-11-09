@@ -27,10 +27,27 @@ func NewWebhookHandler(db *bun.DB) *WebhookHandler {
 func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 	log.Println("DodoPayWebhook: Received webhook")
 
-	// Get Svix headers
+	// Debug: Log all headers
+	log.Println("DodoPayWebhook: All headers:")
+	for name, values := range c.Request().Header {
+		log.Printf("  %s: %v", name, values)
+	}
+
+	// Get Svix headers (try both lowercase and canonical case)
 	svixID := c.Request().Header.Get("svix-id")
+	if svixID == "" {
+		svixID = c.Request().Header.Get("Svix-Id")
+	}
+
 	svixTimestamp := c.Request().Header.Get("svix-timestamp")
+	if svixTimestamp == "" {
+		svixTimestamp = c.Request().Header.Get("Svix-Timestamp")
+	}
+
 	svixSignature := c.Request().Header.Get("svix-signature")
+	if svixSignature == "" {
+		svixSignature = c.Request().Header.Get("Svix-Signature")
+	}
 
 	log.Printf("DodoPayWebhook: Headers - svix-id: %s, svix-timestamp: %s, svix-signature exists: %v",
 		svixID, svixTimestamp, svixSignature != "")
