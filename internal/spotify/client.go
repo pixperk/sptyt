@@ -33,6 +33,29 @@ type Track struct {
 	ISRC    string
 }
 
+type Playlist struct {
+	ID          string
+	Name        string
+	Description string
+	TrackCount  int
+	Owner       string
+	Images      []PlaylistImage
+}
+
+type PlaylistImage struct {
+	URL    string `json:"url"`
+	Height int    `json:"height"`
+	Width  int    `json:"width"`
+}
+
+type PlaylistTrack struct {
+	ID       string
+	Name     string
+	Artists  []string
+	ISRC     string
+	Position int
+}
+
 type trackResponse struct {
 	Name        string `json:"name"`
 	Artists     []struct {
