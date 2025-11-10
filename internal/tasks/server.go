@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"crypto/tls"
 	"log"
 
 	"github.com/hibiken/asynq"
@@ -20,7 +21,12 @@ func NewServer(redisAddr, redisPassword string, converterService *services.Playl
 		Addr: redisAddr,
 	}
 	if redisPassword != "" {
+		redisOpt.Username = "default" // Upstash requires username
 		redisOpt.Password = redisPassword
+		// Enable TLS for Upstash (or any production Redis with TLS)
+		redisOpt.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
 	}
 
 	server := asynq.NewServer(
