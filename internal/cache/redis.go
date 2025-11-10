@@ -116,3 +116,16 @@ func (r *RedisCache) GetClient() *redis.Client {
 func (r *RedisCache) Close() error {
 	return r.client.Close()
 }
+
+// Generic cache methods for string values
+func (r *RedisCache) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
+	return r.client.Set(ctx, key, value, ttl).Err()
+}
+
+func (r *RedisCache) Get(ctx context.Context, key string) (string, error) {
+	return r.client.Get(ctx, key).Result()
+}
+
+func (r *RedisCache) Delete(ctx context.Context, key string) error {
+	return r.client.Del(ctx, key).Err()
+}

@@ -1,0 +1,272 @@
+package handlers
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+	"github.com/pixperk/sptyt/internal/auth"
+	"github.com/pixperk/sptyt/internal/cache"
+	"github.com/pixperk/sptyt/internal/models"
+	"github.com/uptrace/bun"
+)
+
+const youtubeScope = "https://www.googleapis.com/auth/youtube"
+
+type YouTubeOAuthHandler struct {
+	db           *bun.DB
+	cache        *cache.RedisCache
+	clientID     string
+	clientSecret string
+	redirectURI  string
+}
+
+func NewYouTubeOAuthHandler(db *bun.DB, redisCache *cache.RedisCache) *YouTubeOAuthHandler {
+	return &YouTubeOAuthHandler{
+		db:           db,
+		cache:        redisCache,
+		clientID:     os.Getenv("YOUTUBE_OAUTH_CLIENT_ID"),
+		clientSecret: os.Getenv("YOUTUBE_OAUTH_CLIENT_SECRET"),
+		redirectURI:  os.Getenv("YOUTUBE_OAUTH_REDIRECT_URI"),
+	}
+}
+
+// generateState generates a random state token for OAuth security
+func generateState() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+// Authorize initiates the YouTube OAuth flow
+func (h *YouTubeOAuthHandler) Authorize(c echo.Context) error {
+	// Get authenticated user
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	// Generate state token
+	state, err := generateState()
+	if err != nil {
+		log.Printf("Failed to generate state: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to generate state")
+	}
+
+	// Store state in Redis with 10 minute expiry
+	cacheKey := fmt.Sprintf("oauth_state:%s", state)
+	ctx := context.Background()
+	if err := h.cache.Set(ctx, cacheKey, clerkUserID, 10*time.Minute); err != nil {
+		log.Printf("Failed to store state in cache: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to store state")
+	}
+
+	// Build OAuth authorization URL
+	authURL := "https://accounts.google.com/o/oauth2/v2/auth?" + url.Values{
+		"client_id":     {h.clientID},
+		"redirect_uri":  {h.redirectURI},
+		"response_type": {"code"},
+		"scope":         {youtubeScope},
+		"access_type":   {"offline"}, // Get refresh token
+		"state":         {state},
+		"prompt":        {"consent"}, // Force consent to get refresh token
+	}.Encode()
+
+	log.Printf("YouTubeOAuth: Redirecting user %s to authorization URL", clerkUserID)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"authorization_url": authURL,
+	})
+}
+
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+}
+
+// Callback handles the OAuth callback from YouTube
+func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
+	code := c.QueryParam("code")
+	state := c.QueryParam("state")
+	errorParam := c.QueryParam("error")
+
+	if errorParam != "" {
+		log.Printf("YouTubeOAuth: Authorization error: %s", errorParam)
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"error":   errorParam,
+			"message": "Authorization failed",
+		})
+	}
+
+	if code == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Missing authorization code")
+	}
+
+	// Verify state and get user ID from Redis
+	ctx := context.Background()
+	cacheKey := fmt.Sprintf("oauth_state:%s", state)
+	clerkUserID, err := h.cache.Get(ctx, cacheKey)
+	if err != nil {
+		log.Printf("YouTubeOAuth: Invalid or expired state: %v", err)
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid or expired state")
+	}
+
+	// Delete state from cache (one-time use)
+	h.cache.Delete(ctx, cacheKey)
+
+	log.Printf("YouTubeOAuth: Processing callback for user: %s", clerkUserID)
+
+	// Exchange authorization code for tokens
+	tokenResp, err := h.exchangeCodeForToken(ctx, code)
+	if err != nil {
+		log.Printf("YouTubeOAuth: Failed to exchange code: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to exchange authorization code")
+	}
+
+	if tokenResp.RefreshToken == "" {
+		log.Printf("YouTubeOAuth: Warning - no refresh token received")
+	}
+
+	// Get user from database using the clerk ID from state
+	var user models.User
+	err = h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+
+	if err != nil {
+		log.Printf("YouTubeOAuth: Failed to get user: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Save or update OAuth token in database
+	expiresAt := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+
+	oauthToken := &models.UserOAuthToken{
+		ID:           uuid.New(),
+		UserID:       user.ID,
+		Provider:     "youtube",
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: tokenResp.RefreshToken,
+		ExpiresAt:    expiresAt,
+		Scope:        youtubeScope,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	// Upsert token (insert or update if exists)
+	_, err = h.db.NewInsert().
+		Model(oauthToken).
+		On("CONFLICT (user_id, provider) DO UPDATE").
+		Set("access_token = EXCLUDED.access_token").
+		Set("refresh_token = EXCLUDED.refresh_token").
+		Set("expires_at = EXCLUDED.expires_at").
+		Set("scope = EXCLUDED.scope").
+		Set("updated_at = EXCLUDED.updated_at").
+		Exec(ctx)
+
+	if err != nil {
+		log.Printf("YouTubeOAuth: Failed to save token: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save authorization")
+	}
+
+	log.Printf("YouTubeOAuth: Successfully saved OAuth token for user %s", user.ID)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "YouTube authorization successful",
+	})
+}
+
+// exchangeCodeForToken exchanges authorization code for access and refresh tokens
+func (h *YouTubeOAuthHandler) exchangeCodeForToken(ctx context.Context, code string) (*tokenResponse, error) {
+	data := url.Values{
+		"code":          {code},
+		"client_id":     {h.clientID},
+		"client_secret": {h.clientSecret},
+		"redirect_uri":  {h.redirectURI},
+		"grant_type":    {"authorization_code"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://oauth2.googleapis.com/token", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.URL.RawQuery = data.Encode()
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("token exchange failed (status %d): %s", resp.StatusCode, body)
+	}
+
+	var tokenResp tokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, err
+	}
+
+	return &tokenResp, nil
+}
+
+// GetYouTubeAuthStatus checks if user has authorized YouTube
+func (h *YouTubeOAuthHandler) GetYouTubeAuthStatus(c echo.Context) error {
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	ctx := context.Background()
+
+	// Get user from database
+	var user models.User
+	err := h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Check if OAuth token exists
+	var token models.UserOAuthToken
+	err = h.db.NewSelect().
+		Model(&token).
+		Where("user_id = ? AND provider = ?", user.ID, "youtube").
+		Scan(ctx)
+
+	if err != nil {
+		// No token found
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"authorized": false,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"authorized": true,
+		"expires_at": token.ExpiresAt,
+		"is_expired": token.IsExpired(),
+	})
+}
