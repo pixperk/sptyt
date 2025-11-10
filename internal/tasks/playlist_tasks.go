@@ -13,13 +13,14 @@ import (
 // Task type constants
 const (
 	TypePlaylistConversion = "playlist:convert"
+	TypeAnalyticsUpdate    = "analytics:update"
 )
 
 // PlaylistConversionPayload represents the task payload for playlist conversion
 type PlaylistConversionPayload struct {
 	ConversionID        string `json:"conversion_id"`
-	UserID              string `json:"user_id"`               // Database UUID
-	ClerkUserID         string `json:"clerk_user_id"`         // Clerk user ID for WebSocket
+	UserID              string `json:"user_id"`       // Database UUID
+	ClerkUserID         string `json:"clerk_user_id"` // Clerk user ID for WebSocket
 	SpotifyPlaylistID   string `json:"spotify_playlist_id"`
 	SpotifyType         string `json:"spotify_type"` // "playlist" or "album"
 	SpotifyPlaylistURL  string `json:"spotify_playlist_url"`
@@ -35,6 +36,25 @@ func NewPlaylistConversionTask(payload PlaylistConversionPayload) (*asynq.Task, 
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 	return asynq.NewTask(TypePlaylistConversion, payloadBytes), nil
+}
+
+// AnalyticsUpdatePayload represents the task payload for analytics updates
+type AnalyticsUpdatePayload struct {
+	UserID       string `json:"user_id"`       // Database UUID
+	SpotifyType  string `json:"spotify_type"`  // "playlist" or "album"
+	IsSuccess    bool   `json:"is_success"`    // Whether conversion succeeded
+	TrackCount   int    `json:"track_count"`   // Total tracks
+	SuccessCount int    `json:"success_count"` // Successfully matched tracks
+	FailureCount int    `json:"failure_count"` // Failed tracks
+}
+
+// NewAnalyticsUpdateTask creates a new Asynq task for analytics updates
+func NewAnalyticsUpdateTask(payload AnalyticsUpdatePayload) (*asynq.Task, error) {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal analytics payload: %w", err)
+	}
+	return asynq.NewTask(TypeAnalyticsUpdate, payloadBytes), nil
 }
 
 // PlaylistConversionProcessor handles playlist conversion tasks
@@ -78,5 +98,25 @@ func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Cont
 	}
 
 	log.Printf("Playlist conversion completed successfully: %s", payload.ConversionID)
+	return nil
+}
+
+// ProcessAnalyticsUpdate processes an analytics update task
+func (p *PlaylistConversionProcessor) ProcessAnalyticsUpdate(ctx context.Context, t *asynq.Task) error {
+	var payload AnalyticsUpdatePayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal analytics payload: %w", err)
+	}
+
+	log.Printf("Processing analytics update task for user: %s", payload.UserID)
+
+	// Call the analytics update service method
+	err := p.converterService.UpdateUserAnalytics(ctx, payload.UserID, payload.SpotifyType, payload.IsSuccess, payload.TrackCount, payload.SuccessCount, payload.FailureCount)
+	if err != nil {
+		log.Printf("Analytics update failed: %v", err)
+		return fmt.Errorf("analytics update failed: %w", err)
+	}
+
+	log.Printf("Analytics update completed successfully for user: %s", payload.UserID)
 	return nil
 }

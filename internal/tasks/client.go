@@ -43,6 +43,27 @@ func (c *Client) EnqueuePlaylistConversion(payload PlaylistConversionPayload) er
 	return err
 }
 
+// EnqueueAnalyticsUpdate enqueues an analytics update task (implements services.AnalyticsTaskClient)
+func (c *Client) EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error {
+	payload := AnalyticsUpdatePayload{
+		UserID:       userID,
+		SpotifyType:  spotifyType,
+		IsSuccess:    isSuccess,
+		TrackCount:   trackCount,
+		SuccessCount: successCount,
+		FailureCount: failureCount,
+	}
+
+	task, err := NewAnalyticsUpdateTask(payload)
+	if err != nil {
+		return err
+	}
+
+	// Enqueue with default options (processed immediately)
+	_, err = c.client.Enqueue(task)
+	return err
+}
+
 // Close closes the client connection
 func (c *Client) Close() error {
 	return c.client.Close()

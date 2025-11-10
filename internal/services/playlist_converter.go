@@ -16,20 +16,27 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// AnalyticsTaskClient interface for enqueuing analytics tasks (avoids import cycle)
+type AnalyticsTaskClient interface {
+	EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error
+}
+
 type PlaylistConverterService struct {
 	db            *bun.DB
 	spotifyClient *spotify.Client
 	youtubeClient *youtube.Client
 	wsHub         *ws.Hub
+	taskClient    AnalyticsTaskClient
 	workerCount   int
 }
 
-func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, wsHub *ws.Hub) *PlaylistConverterService {
+func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, wsHub *ws.Hub, taskClient AnalyticsTaskClient) *PlaylistConverterService {
 	return &PlaylistConverterService{
 		db:            db,
 		spotifyClient: spotifyClient,
 		youtubeClient: youtubeClient,
 		wsHub:         wsHub,
+		taskClient:    taskClient,
 		workerCount:   5, // 5 concurrent workers
 	}
 }
@@ -226,11 +233,11 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	rowsAffected, _ := result.RowsAffected()
 	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed (DB rows affected: %d)", conversion.ID, conversion.SuccessCount, conversion.FailureCount, rowsAffected)
 
-	// Update user analytics
+	// Enqueue analytics update task (async)
 	isSuccess := conversion.Status == "completed"
-	if err := s.updateUserAnalytics(ctx, conversion.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount); err != nil {
-		log.Printf("ConversionService: WARNING - Failed to update user analytics: %v", err)
-		// Don't fail the conversion if analytics update fails
+	if err := s.taskClient.EnqueueAnalyticsUpdate(job.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount); err != nil {
+		log.Printf("ConversionService: WARNING - Failed to enqueue analytics update task: %v", err)
+		// Don't fail the conversion if analytics enqueue fails
 	}
 
 	// Send completed event
@@ -476,7 +483,16 @@ func (s *PlaylistConverterService) publishProgress(userID string, conversionID s
 	s.wsHub.BroadcastToUser(userID, event)
 }
 
-// updateUserAnalytics updates or creates user analytics record
+// UpdateUserAnalytics updates or creates user analytics record (accepts string UUID)
+func (s *PlaylistConverterService) UpdateUserAnalytics(ctx context.Context, userIDStr string, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error {
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %w", err)
+	}
+	return s.updateUserAnalytics(ctx, userID, spotifyType, isSuccess, trackCount, successCount, failureCount)
+}
+
+// updateUserAnalytics updates or creates user analytics record (internal method)
 func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error {
 	now := time.Now()
 

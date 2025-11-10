@@ -83,8 +83,8 @@ func main() {
 	taskClient := tasks.NewClient(asynqRedisAddr, asynqRedisPassword)
 	defer taskClient.Close()
 
-	// Initialize playlist conversion service with WebSocket hub
-	converterService := services.NewPlaylistConverterService(cfg.DB, spotifyClient, youtubeClient, wsHub)
+	// Initialize playlist conversion service with WebSocket hub and task client
+	converterService := services.NewPlaylistConverterService(cfg.DB, spotifyClient, youtubeClient, wsHub, taskClient)
 
 	// Start Asynq task server in background
 	taskServer := tasks.NewServer(asynqRedisAddr, asynqRedisPassword, converterService, 10) // 10 concurrent workers

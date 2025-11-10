@@ -46,6 +46,7 @@ func NewServer(redisAddr, redisPassword string, converterService *services.Playl
 
 	// Register task handlers
 	mux.HandleFunc(TypePlaylistConversion, processor.ProcessPlaylistConversion)
+	mux.HandleFunc(TypeAnalyticsUpdate, processor.ProcessAnalyticsUpdate)
 
 	return &Server{
 		server:    server,
