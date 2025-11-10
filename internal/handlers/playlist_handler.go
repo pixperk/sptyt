@@ -4,12 +4,15 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
 	custommw "github.com/pixperk/sptyt/internal/middleware"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
+	"github.com/pixperk/sptyt/internal/tasks"
 	"github.com/pixperk/sptyt/pkg/utils"
 	"github.com/uptrace/bun"
 )
@@ -17,12 +20,14 @@ import (
 type PlaylistHandler struct {
 	db               *bun.DB
 	converterService *services.PlaylistConverterService
+	taskClient       *tasks.Client
 }
 
-func NewPlaylistHandler(db *bun.DB, converterService *services.PlaylistConverterService) *PlaylistHandler {
+func NewPlaylistHandler(db *bun.DB, converterService *services.PlaylistConverterService, taskClient *tasks.Client) *PlaylistHandler {
 	return &PlaylistHandler{
 		db:               db,
 		converterService: converterService,
+		taskClient:       taskClient,
 	}
 }
 
@@ -95,9 +100,30 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		return err
 	}
 
-	// Create conversion job
-	job := &services.ConversionJob{
-		UserID:              user.ID,
+	// Create conversion record in database
+	conversion := &models.PlaylistConversion{
+		ID:                 uuid.New(),
+		UserID:             user.ID,
+		SpotifyPlaylistID:  playlistID,
+		SpotifyPlaylistURL: req.SpotifyPlaylistURL,
+		PlaylistName:       spotifyPlaylist.Name,
+		TrackCount:         spotifyPlaylist.TrackCount,
+		Status:             "pending",
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+	}
+
+	// Save initial conversion record
+	_, err = h.db.NewInsert().Model(conversion).Exec(ctx)
+	if err != nil {
+		log.Printf("ConvertPlaylist: Failed to create conversion record: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create conversion record")
+	}
+
+	// Create task payload
+	payload := tasks.PlaylistConversionPayload{
+		ConversionID:        conversion.ID.String(),
+		UserID:              user.ID.String(),
 		SpotifyPlaylistID:   playlistID,
 		SpotifyPlaylistURL:  req.SpotifyPlaylistURL,
 		YouTubeAccessToken:  youtubeToken.AccessToken,
@@ -105,18 +131,19 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		UseLyricVideos:      req.UseLyricVideos,
 	}
 
-	// Start conversion in background
-	go func() {
-		bgCtx := context.Background()
-		_, err := h.converterService.ConvertPlaylist(bgCtx, job)
-		if err != nil {
-			log.Printf("ConvertPlaylist: Conversion failed: %v", err)
-		}
-	}()
+	// Enqueue task with Asynq
+	err = h.taskClient.EnqueuePlaylistConversion(payload)
+	if err != nil {
+		log.Printf("ConvertPlaylist: Failed to enqueue task: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start conversion")
+	}
+
+	log.Printf("ConvertPlaylist: Enqueued conversion task %s for user %s", conversion.ID, user.ID)
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
-		"message": "Playlist conversion started",
-		"status":  "processing",
+		"message":       "Playlist conversion started",
+		"conversion_id": conversion.ID.String(),
+		"status":        "pending",
 	})
 }
 

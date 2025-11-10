@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/spotify"
+	ws "github.com/pixperk/sptyt/internal/websocket"
 	"github.com/pixperk/sptyt/internal/youtube"
 	"github.com/uptrace/bun"
 )
@@ -19,20 +20,23 @@ type PlaylistConverterService struct {
 	db            *bun.DB
 	spotifyClient *spotify.Client
 	youtubeClient *youtube.Client
+	wsHub         *ws.Hub
 	workerCount   int
 }
 
-func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client) *PlaylistConverterService {
+func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, wsHub *ws.Hub) *PlaylistConverterService {
 	return &PlaylistConverterService{
 		db:            db,
 		spotifyClient: spotifyClient,
 		youtubeClient: youtubeClient,
+		wsHub:         wsHub,
 		workerCount:   5, // 5 concurrent workers
 	}
 }
 
 type ConversionJob struct {
-	UserID             uuid.UUID
+	ConversionID       string
+	UserID             string
 	SpotifyPlaylistID  string
 	SpotifyPlaylistURL string
 	YouTubeAccessToken string
@@ -50,24 +54,27 @@ type TrackMatchResult struct {
 
 // ConvertPlaylist converts a Spotify playlist to YouTube playlist
 func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *ConversionJob) (*models.PlaylistConversion, error) {
-	// Create conversion record
-	conversion := &models.PlaylistConversion{
-		ID:                 uuid.New(),
-		UserID:             job.UserID,
-		SpotifyPlaylistID:  job.SpotifyPlaylistID,
-		SpotifyPlaylistURL: job.SpotifyPlaylistURL,
-		Status:             "processing",
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
+	// Parse ConversionID
+	conversionID, err := uuid.Parse(job.ConversionID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid conversion ID: %w", err)
 	}
 
-	// Save initial conversion record
-	_, err := s.db.NewInsert().Model(conversion).Exec(ctx)
+	// Get existing conversion record (created by handler)
+	var conversion models.PlaylistConversion
+	err = s.db.NewSelect().
+		Model(&conversion).
+		Where("id = ?", conversionID).
+		Scan(ctx)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to create conversion record: %w", err)
+		return nil, fmt.Errorf("failed to get conversion record: %w", err)
 	}
 
 	log.Printf("ConversionService: Starting conversion %s for user %s", conversion.ID, job.UserID)
+
+	// Send started event
+	s.publishProgress(job.UserID, conversion.ID.String(), "started", "Conversion started", nil)
 
 	// Fetch Spotify playlist
 	playlist, err := s.spotifyClient.GetPlaylist(ctx, job.SpotifyPlaylistID)
@@ -89,6 +96,12 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	conversion.TrackCount = len(tracks)
 	log.Printf("ConversionService: Fetched %d tracks from Spotify", len(tracks))
 
+	// Send progress: tracks fetched
+	s.publishProgress(job.UserID, conversion.ID.String(), "progress", "Fetched tracks from Spotify", ws.ProgressData{
+		TotalTracks:     len(tracks),
+		ProcessedTracks: 0,
+	})
+
 	// Create YouTube playlist
 	youtubePlaylistName := job.YouTubePlaylistName
 	if youtubePlaylistName == "" {
@@ -98,6 +111,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	youtubePlaylistID, err := s.youtubeClient.CreatePlaylist(ctx, job.YouTubeAccessToken, youtubePlaylistName, fmt.Sprintf("Converted from Spotify playlist: %s", playlist.Name))
 	if err != nil {
 		s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err))
+		s.publishProgress(job.UserID, conversion.ID.String(), "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err), nil)
 		return nil, fmt.Errorf("failed to create YouTube playlist: %w", err)
 	}
 
@@ -106,8 +120,16 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	log.Printf("ConversionService: Created YouTube playlist: %s", youtubePlaylistID)
 
+	// Send progress: YouTube playlist created
+	s.publishProgress(job.UserID, conversion.ID.String(), "progress", "YouTube playlist created", ws.ProgressData{
+		TotalTracks:        len(tracks),
+		ProcessedTracks:    0,
+		YouTubePlaylistID:  youtubePlaylistID,
+		YouTubePlaylistURL: conversion.YouTubePlaylistURL,
+	})
+
 	// Match tracks concurrently using worker pool
-	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job.UseLyricVideos)
+	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job.UseLyricVideos, job.UserID, conversion.ID.String())
 
 	// Add matched videos to YouTube playlist
 	var conversionLogs []models.TrackConversionLog
@@ -181,14 +203,28 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed", conversion.ID, conversion.SuccessCount, conversion.FailureCount)
 
-	return conversion, nil
+	// Send completed event
+	s.publishProgress(job.UserID, conversion.ID.String(), "completed", "Conversion completed", ws.ProgressData{
+		TotalTracks:        conversion.TrackCount,
+		ProcessedTracks:    conversion.TrackCount,
+		SuccessCount:       conversion.SuccessCount,
+		FailureCount:       conversion.FailureCount,
+		YouTubePlaylistID:  conversion.YouTubePlaylistID,
+		YouTubePlaylistURL: conversion.YouTubePlaylistURL,
+	})
+
+	return &conversion, nil
 }
 
 // matchTracksWithWorkerPool uses a worker pool to match tracks concurrently
-func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context, tracks []*spotify.PlaylistTrack, useLyricVideos bool) []TrackMatchResult {
+func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context, tracks []*spotify.PlaylistTrack, useLyricVideos bool, userID string, conversionID string) []TrackMatchResult {
 	// Create channels
 	jobsChan := make(chan *spotify.PlaylistTrack, len(tracks))
 	resultsChan := make(chan TrackMatchResult, len(tracks))
+
+	totalTracks := len(tracks)
+	processedCount := 0
+	var mu sync.Mutex
 
 	// Start workers
 	var wg sync.WaitGroup
@@ -209,10 +245,29 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 		close(resultsChan)
 	}()
 
-	// Collect results
+	// Collect results and send progress updates
 	var results []TrackMatchResult
 	for result := range resultsChan {
 		results = append(results, result)
+
+		mu.Lock()
+		processedCount++
+		currentCount := processedCount
+		mu.Unlock()
+
+		// Send progress update every 5 tracks or on completion
+		if currentCount%5 == 0 || currentCount == totalTracks {
+			var currentTrack string
+			if result.Track != nil {
+				currentTrack = fmt.Sprintf("%s - %s", result.Track.Name, strings.Join(result.Track.Artists, ", "))
+			}
+
+			s.publishProgress(userID, conversionID, "progress", fmt.Sprintf("Matching tracks: %d/%d", currentCount, totalTracks), ws.ProgressData{
+				TotalTracks:     totalTracks,
+				ProcessedTracks: currentCount,
+				CurrentTrack:    currentTrack,
+			})
+		}
 	}
 
 	return results
@@ -353,4 +408,20 @@ func (s *PlaylistConverterService) GetUserConversions(ctx context.Context, userI
 // FetchPlaylistInfo fetches basic playlist info from Spotify
 func (s *PlaylistConverterService) FetchPlaylistInfo(ctx context.Context, playlistID string) (*spotify.Playlist, error) {
 	return s.spotifyClient.GetPlaylist(ctx, playlistID)
+}
+
+// publishProgress sends progress updates via WebSocket
+func (s *PlaylistConverterService) publishProgress(userID string, conversionID string, eventType string, message string, data interface{}) {
+	if s.wsHub == nil {
+		return
+	}
+
+	event := ws.ProgressEvent{
+		Type:         eventType,
+		ConversionID: conversionID,
+		Message:      message,
+		Data:         data,
+	}
+
+	s.wsHub.BroadcastToUser(userID, event)
 }

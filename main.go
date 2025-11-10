@@ -17,6 +17,8 @@ import (
 	custommw "github.com/pixperk/sptyt/internal/middleware"
 	"github.com/pixperk/sptyt/internal/services"
 	"github.com/pixperk/sptyt/internal/spotify"
+	"github.com/pixperk/sptyt/internal/tasks"
+	ws "github.com/pixperk/sptyt/internal/websocket"
 	"github.com/pixperk/sptyt/internal/youtube"
 )
 
@@ -67,8 +69,25 @@ func main() {
 	geniusClient := genius.NewClient(geniusAccessToken)
 	handler := handlers.NewHandler(spotifyClient, youtubeClient, geniusClient, redisCache)
 
-	// Initialize playlist conversion service
-	converterService := services.NewPlaylistConverterService(cfg.DB, spotifyClient, youtubeClient)
+	// Initialize WebSocket hub
+	wsHub := ws.NewHub()
+	go wsHub.Run()
+
+	// Initialize Asynq task client
+	taskClient := tasks.NewClient(redisURL)
+	defer taskClient.Close()
+
+	// Initialize playlist conversion service with WebSocket hub
+	converterService := services.NewPlaylistConverterService(cfg.DB, spotifyClient, youtubeClient, wsHub)
+
+	// Start Asynq task server in background
+	taskServer := tasks.NewServer(redisURL, converterService, 10) // 10 concurrent workers
+	go func() {
+		if err := taskServer.Start(); err != nil {
+			log.Fatalf("Asynq server failed: %v", err)
+		}
+	}()
+	defer taskServer.Shutdown()
 
 	e := echo.New()
 
@@ -99,8 +118,9 @@ func main() {
 		clerkMiddleware := auth.NewClerkMiddleware(cfg.ClerkSecretKey)
 		protectedHandler := handlers.NewProtectedHandler(handler, cfg.DB)
 		youtubeOAuthHandler := handlers.NewYouTubeOAuthHandler(cfg.DB, redisCache)
-		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService)
+		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService, taskClient)
 		playlistLimiter := custommw.NewPlaylistLimiter(cfg.DB, redisCache)
+		wsHandler := handlers.NewWebSocketHandler(wsHub)
 
 		// Create protected API group
 		api := e.Group("/api")
@@ -111,6 +131,9 @@ func main() {
 		api.POST("/checkout", protectedHandler.CreateCheckoutSession)
 		api.POST("/subscription/cancel", protectedHandler.CancelSubscription)
 		api.GET("/payment/return", protectedHandler.PaymentReturn)
+
+		// WebSocket endpoint for real-time progress
+		api.GET("/ws/playlist-progress", wsHandler.HandleConnection)
 
 		// YouTube OAuth endpoints
 		api.GET("/auth/youtube/authorize", youtubeOAuthHandler.Authorize)
@@ -124,6 +147,7 @@ func main() {
 		api.GET("/playlists/conversions/:id", playlistHandler.GetConversionStatus)
 
 		log.Println("Clerk authentication enabled - /api/me route available")
+		log.Println("WebSocket server running - /api/ws/playlist-progress available")
 	} else {
 		log.Println("Clerk not configured - protected routes disabled")
 	}
