@@ -84,5 +84,23 @@ func RunMigrations(db *bun.DB) {
 		log.Fatalf("Failed to create playlist_conversions indexes: %v", err)
 	}
 
+	// Create user_analytics table
+	_, err = db.NewCreateTable().
+		Model((*models.UserAnalytics)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create user_analytics table: %v", err)
+	}
+
+	// Create indexes for user_analytics
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_user_analytics_user_id ON user_analytics(user_id);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_user_analytics_user_unique ON user_analytics(user_id);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create user_analytics indexes: %v", err)
+	}
+
 	log.Println("Database migrations completed successfully")
 }

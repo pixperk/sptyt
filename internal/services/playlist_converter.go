@@ -226,6 +226,13 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	rowsAffected, _ := result.RowsAffected()
 	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed (DB rows affected: %d)", conversion.ID, conversion.SuccessCount, conversion.FailureCount, rowsAffected)
 
+	// Update user analytics
+	isSuccess := conversion.Status == "completed"
+	if err := s.updateUserAnalytics(ctx, conversion.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount); err != nil {
+		log.Printf("ConversionService: WARNING - Failed to update user analytics: %v", err)
+		// Don't fail the conversion if analytics update fails
+	}
+
 	// Send completed event
 	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "completed", "Conversion completed", ws.ProgressData{
 		TotalTracks:        conversion.TrackCount,
@@ -467,4 +474,71 @@ func (s *PlaylistConverterService) publishProgress(userID string, conversionID s
 	}
 
 	s.wsHub.BroadcastToUser(userID, event)
+}
+
+// updateUserAnalytics updates or creates user analytics record
+func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error {
+	now := time.Now()
+
+	// Try to get existing analytics record
+	var analytics models.UserAnalytics
+	err := s.db.NewSelect().
+		Model(&analytics).
+		Where("user_id = ?", userID).
+		Scan(ctx)
+
+	if err != nil {
+		// Record doesn't exist, create it
+		analytics = models.UserAnalytics{
+			UserID:               userID,
+			TotalConversions:     1,
+			TotalTracksProcessed: trackCount,
+			TotalTracksMatched:   successCount,
+			TotalTracksFailed:    failureCount,
+			FirstConversionAt:    &now,
+			LastConversionAt:     &now,
+			CreatedAt:            now,
+			UpdatedAt:            now,
+		}
+
+		if isSuccess {
+			analytics.SuccessfulConversions = 1
+		} else {
+			analytics.FailedConversions = 1
+		}
+
+		if spotifyType == "album" {
+			analytics.AlbumsConverted = 1
+		} else {
+			analytics.PlaylistsConverted = 1
+		}
+
+		_, err = s.db.NewInsert().Model(&analytics).Exec(ctx)
+		return err
+	}
+
+	// Record exists, update it
+	update := s.db.NewUpdate().
+		Model(&analytics).
+		Set("total_conversions = total_conversions + 1").
+		Set("total_tracks_processed = total_tracks_processed + ?", trackCount).
+		Set("total_tracks_matched = total_tracks_matched + ?", successCount).
+		Set("total_tracks_failed = total_tracks_failed + ?", failureCount).
+		Set("last_conversion_at = ?", now).
+		Set("updated_at = ?", now)
+
+	if isSuccess {
+		update = update.Set("successful_conversions = successful_conversions + 1")
+	} else {
+		update = update.Set("failed_conversions = failed_conversions + 1")
+	}
+
+	if spotifyType == "album" {
+		update = update.Set("albums_converted = albums_converted + 1")
+	} else {
+		update = update.Set("playlists_converted = playlists_converted + 1")
+	}
+
+	_, err = update.Where("user_id = ?", userID).Exec(ctx)
+	return err
 }

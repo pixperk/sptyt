@@ -131,6 +131,7 @@ func main() {
 		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService, taskClient)
 		playlistLimiter := custommw.NewPlaylistLimiter(cfg.DB, redisCache)
 		wsHandler := handlers.NewWebSocketHandler(wsHub)
+		analyticsHandler := handlers.NewAnalyticsHandler(cfg.DB)
 
 		// YouTube OAuth callback (NO AUTH REQUIRED - uses state token)
 		e.GET("/api/auth/youtube/callback", youtubeOAuthHandler.Callback)
@@ -157,6 +158,10 @@ func main() {
 		api.POST("/playlists/convert", playlistHandler.ConvertPlaylist, playlistLimiter.CheckPlaylistConversionLimits())
 		api.GET("/playlists/conversions", playlistHandler.GetUserConversions)
 		api.GET("/playlists/conversions/:id", playlistHandler.GetConversionStatus)
+
+		// Analytics endpoints
+		api.GET("/analytics", analyticsHandler.GetUserAnalytics)
+		api.GET("/dashboard", analyticsHandler.GetUserDashboard)
 
 		log.Println("Clerk authentication enabled - /api/me route available")
 		log.Println("WebSocket server running - /api/ws/playlist-progress available")
