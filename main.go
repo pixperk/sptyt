@@ -122,6 +122,9 @@ func main() {
 		playlistLimiter := custommw.NewPlaylistLimiter(cfg.DB, redisCache)
 		wsHandler := handlers.NewWebSocketHandler(wsHub)
 
+		// YouTube OAuth callback (NO AUTH REQUIRED - uses state token)
+		e.GET("/api/auth/youtube/callback", youtubeOAuthHandler.Callback)
+
 		// Create protected API group
 		api := e.Group("/api")
 		api.Use(clerkMiddleware.RequireAuth())
@@ -135,9 +138,8 @@ func main() {
 		// WebSocket endpoint for real-time progress
 		api.GET("/ws/playlist-progress", wsHandler.HandleConnection)
 
-		// YouTube OAuth endpoints
+		// YouTube OAuth endpoints (protected - except callback above)
 		api.GET("/auth/youtube/authorize", youtubeOAuthHandler.Authorize)
-		api.GET("/auth/youtube/callback", youtubeOAuthHandler.Callback)
 		api.GET("/auth/youtube/status", youtubeOAuthHandler.GetYouTubeAuthStatus)
 
 		// Playlist conversion endpoints (with rate limiting)

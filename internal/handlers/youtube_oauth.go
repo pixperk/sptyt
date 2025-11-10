@@ -104,16 +104,21 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	state := c.QueryParam("state")
 	errorParam := c.QueryParam("error")
 
+	// Get frontend URL for redirects
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+
 	if errorParam != "" {
 		log.Printf("YouTubeOAuth: Authorization error: %s", errorParam)
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error":   errorParam,
-			"message": "Authorization failed",
-		})
+		redirectURL := fmt.Sprintf("%s/playlists?youtube_auth=error&error=%s", frontendURL, url.QueryEscape(errorParam))
+		return c.Redirect(http.StatusFound, redirectURL)
 	}
 
 	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Missing authorization code")
+		redirectURL := fmt.Sprintf("%s/playlists?youtube_auth=error&error=missing_code", frontendURL)
+		return c.Redirect(http.StatusFound, redirectURL)
 	}
 
 	// Verify state and get user ID from Redis
@@ -186,10 +191,9 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 
 	log.Printf("YouTubeOAuth: Successfully saved OAuth token for user %s", user.ID)
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "YouTube authorization successful",
-	})
+	// Redirect to frontend with success indicator
+	redirectURL := fmt.Sprintf("%s/playlists?youtube_auth=success", frontendURL)
+	return c.Redirect(http.StatusFound, redirectURL)
 }
 
 // exchangeCodeForToken exchanges authorization code for access and refresh tokens
