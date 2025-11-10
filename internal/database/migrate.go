@@ -46,5 +46,43 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Dropped username column from users table")
 	}
 
+	// Create oauth_tokens table
+	_, err = db.NewCreateTable().
+		Model((*models.UserOAuthToken)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create oauth_tokens table: %v", err)
+	}
+
+	// Create playlist_conversions table
+	_, err = db.NewCreateTable().
+		Model((*models.PlaylistConversion)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create playlist_conversions table: %v", err)
+	}
+
+	// Create indexes for oauth_tokens
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user_id ON oauth_tokens(user_id);
+		CREATE INDEX IF NOT EXISTS idx_oauth_tokens_provider ON oauth_tokens(provider);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_tokens_user_provider ON oauth_tokens(user_id, provider);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create oauth_tokens indexes: %v", err)
+	}
+
+	// Create indexes for playlist_conversions
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_playlist_conversions_user_id ON playlist_conversions(user_id);
+		CREATE INDEX IF NOT EXISTS idx_playlist_conversions_status ON playlist_conversions(status);
+		CREATE INDEX IF NOT EXISTS idx_playlist_conversions_created_at ON playlist_conversions(created_at DESC);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create playlist_conversions indexes: %v", err)
+	}
+
 	log.Println("Database migrations completed successfully")
 }
