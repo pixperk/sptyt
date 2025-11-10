@@ -100,6 +100,7 @@ func main() {
 		protectedHandler := handlers.NewProtectedHandler(handler, cfg.DB)
 		youtubeOAuthHandler := handlers.NewYouTubeOAuthHandler(cfg.DB, redisCache)
 		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService)
+		playlistLimiter := custommw.NewPlaylistLimiter(cfg.DB, redisCache)
 
 		// Create protected API group
 		api := e.Group("/api")
@@ -116,8 +117,9 @@ func main() {
 		api.GET("/auth/youtube/callback", youtubeOAuthHandler.Callback)
 		api.GET("/auth/youtube/status", youtubeOAuthHandler.GetYouTubeAuthStatus)
 
-		// Playlist conversion endpoints
-		api.POST("/playlists/convert", playlistHandler.ConvertPlaylist)
+		// Playlist conversion endpoints (with rate limiting)
+		api.GET("/playlists/limits", playlistLimiter.GetUserLimitsInfo)
+		api.POST("/playlists/convert", playlistHandler.ConvertPlaylist, playlistLimiter.CheckPlaylistConversionLimits())
 		api.GET("/playlists/conversions", playlistHandler.GetUserConversions)
 		api.GET("/playlists/conversions/:id", playlistHandler.GetConversionStatus)
 

@@ -349,3 +349,8 @@ func (s *PlaylistConverterService) GetUserConversions(ctx context.Context, userI
 
 	return conversions, nil
 }
+
+// FetchPlaylistInfo fetches basic playlist info from Spotify
+func (s *PlaylistConverterService) FetchPlaylistInfo(ctx context.Context, playlistID string) (*spotify.Playlist, error) {
+	return s.spotifyClient.GetPlaylist(ctx, playlistID)
+}

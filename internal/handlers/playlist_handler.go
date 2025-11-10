@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
+	custommw "github.com/pixperk/sptyt/internal/middleware"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
 	"github.com/pixperk/sptyt/pkg/utils"
@@ -82,6 +83,17 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 	}
 
 	log.Printf("ConvertPlaylist: User %s converting playlist %s", user.ID, playlistID)
+
+	// Fetch playlist to check track count BEFORE starting conversion
+	spotifyPlaylist, err := h.converterService.FetchPlaylistInfo(ctx, playlistID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Failed to fetch Spotify playlist. Make sure it's a valid public playlist.")
+	}
+
+	// Validate playlist size against user's limits
+	if err := custommw.ValidatePlaylistSize(c, spotifyPlaylist.TrackCount); err != nil {
+		return err
+	}
 
 	// Create conversion job
 	job := &services.ConversionJob{
