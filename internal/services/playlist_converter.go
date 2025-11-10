@@ -36,7 +36,8 @@ func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, yout
 
 type ConversionJob struct {
 	ConversionID        string
-	UserID              string
+	UserID              string // Database UUID
+	ClerkUserID         string // Clerk user ID for WebSocket
 	SpotifyPlaylistID   string
 	SpotifyType         string // "playlist" or "album"
 	SpotifyPlaylistURL  string
@@ -76,7 +77,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	log.Printf("ConversionService: Starting conversion %s for user %s", conversion.ID, job.UserID)
 
 	// Send started event
-	s.publishProgress(job.UserID, conversion.ID.String(), "started", "Conversion started", nil)
+	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "started", "Conversion started", nil)
 
 	// Fetch Spotify content (playlist or album)
 	var playlist *spotify.Playlist
@@ -117,7 +118,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	log.Printf("ConversionService: Fetched %d tracks from Spotify %s", len(tracks), job.SpotifyType)
 
 	// Send progress: tracks fetched
-	s.publishProgress(job.UserID, conversion.ID.String(), "progress", "Fetched tracks from Spotify", ws.ProgressData{
+	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "progress", "Fetched tracks from Spotify", ws.ProgressData{
 		TotalTracks:     len(tracks),
 		ProcessedTracks: 0,
 	})
@@ -131,7 +132,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	youtubePlaylistID, err := s.youtubeClient.CreatePlaylist(ctx, job.YouTubeAccessToken, youtubePlaylistName, fmt.Sprintf("Converted from Spotify playlist: %s", playlist.Name))
 	if err != nil {
 		s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err))
-		s.publishProgress(job.UserID, conversion.ID.String(), "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err), nil)
+		s.publishProgress(job.ClerkUserID, conversion.ID.String(), "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err), nil)
 		return nil, fmt.Errorf("failed to create YouTube playlist: %w", err)
 	}
 
@@ -141,7 +142,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	log.Printf("ConversionService: Created YouTube playlist: %s", youtubePlaylistID)
 
 	// Send progress: YouTube playlist created
-	s.publishProgress(job.UserID, conversion.ID.String(), "progress", "YouTube playlist created", ws.ProgressData{
+	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "progress", "YouTube playlist created", ws.ProgressData{
 		TotalTracks:        len(tracks),
 		ProcessedTracks:    0,
 		YouTubePlaylistID:  youtubePlaylistID,
@@ -149,7 +150,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	})
 
 	// Match tracks concurrently using worker pool
-	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job.UseLyricVideos, job.UserID, conversion.ID.String())
+	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job.UseLyricVideos, job.ClerkUserID, conversion.ID.String())
 
 	// Add matched videos to YouTube playlist
 	var conversionLogs []models.TrackConversionLog
@@ -213,7 +214,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	result, err := s.db.NewUpdate().
 		Model(conversion).
-		Column("playlist_name", "track_count", "success_count", "failure_count", "youtube_playlist_id", "youtube_playlist_url", "conversion_log", "status", "updated_at", "completed_at").
+		Column("playlist_name", "track_count", "success_count", "failure_count", "you_tube_playlist_id", "you_tube_playlist_url", "conversion_log", "status", "updated_at", "completed_at").
 		Where("id = ?", conversion.ID).
 		Exec(ctx)
 
@@ -226,7 +227,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed (DB rows affected: %d)", conversion.ID, conversion.SuccessCount, conversion.FailureCount, rowsAffected)
 
 	// Send completed event
-	s.publishProgress(job.UserID, conversion.ID.String(), "completed", "Conversion completed", ws.ProgressData{
+	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "completed", "Conversion completed", ws.ProgressData{
 		TotalTracks:        conversion.TrackCount,
 		ProcessedTracks:    conversion.TrackCount,
 		SuccessCount:       conversion.SuccessCount,

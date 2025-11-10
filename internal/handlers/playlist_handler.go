@@ -141,6 +141,7 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 	payload := tasks.PlaylistConversionPayload{
 		ConversionID:        conversion.ID.String(),
 		UserID:              user.ID.String(),
+		ClerkUserID:         clerkUserID,
 		SpotifyPlaylistID:   spotifyID,
 		SpotifyType:         spotifyType,
 		SpotifyPlaylistURL:  req.SpotifyPlaylistURL,

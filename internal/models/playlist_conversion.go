@@ -14,8 +14,8 @@ type PlaylistConversion struct {
 	UserID             uuid.UUID `bun:"type:uuid,notnull" json:"user_id"`
 	SpotifyPlaylistID  string    `bun:",notnull" json:"spotify_playlist_id"`
 	SpotifyPlaylistURL string    `bun:",notnull" json:"spotify_playlist_url"`
-	YouTubePlaylistID  string    `bun:"" json:"youtube_playlist_id,omitempty"`
-	YouTubePlaylistURL string    `bun:"" json:"youtube_playlist_url,omitempty"`
+	YouTubePlaylistID  string    `bun:"column:you_tube_playlist_id" json:"youtube_playlist_id,omitempty"`
+	YouTubePlaylistURL string    `bun:"column:you_tube_playlist_url" json:"youtube_playlist_url,omitempty"`
 
 	PlaylistName string `bun:",notnull" json:"playlist_name"`
 	TrackCount   int    `bun:",notnull,default:0" json:"track_count"`

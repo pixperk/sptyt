@@ -18,7 +18,8 @@ const (
 // PlaylistConversionPayload represents the task payload for playlist conversion
 type PlaylistConversionPayload struct {
 	ConversionID        string `json:"conversion_id"`
-	UserID              string `json:"user_id"`
+	UserID              string `json:"user_id"`               // Database UUID
+	ClerkUserID         string `json:"clerk_user_id"`         // Clerk user ID for WebSocket
 	SpotifyPlaylistID   string `json:"spotify_playlist_id"`
 	SpotifyType         string `json:"spotify_type"` // "playlist" or "album"
 	SpotifyPlaylistURL  string `json:"spotify_playlist_url"`
@@ -60,6 +61,7 @@ func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Cont
 	job := &services.ConversionJob{
 		ConversionID:        payload.ConversionID,
 		UserID:              payload.UserID,
+		ClerkUserID:         payload.ClerkUserID,
 		SpotifyPlaylistID:   payload.SpotifyPlaylistID,
 		SpotifyType:         payload.SpotifyType,
 		SpotifyPlaylistURL:  payload.SpotifyPlaylistURL,
