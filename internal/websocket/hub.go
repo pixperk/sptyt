@@ -110,13 +110,22 @@ func (h *Hub) Run() {
 		case message := <-h.broadcast:
 			h.mu.RLock()
 			clients := h.clients[message.UserID]
+			clientCount := len(clients)
 			h.mu.RUnlock()
+
+			log.Printf("WebSocket: Sending message to %d client(s) for user %s", clientCount, message.UserID)
+
+			if clientCount == 0 {
+				log.Printf("WebSocket: WARNING - No clients connected for user %s", message.UserID)
+			}
 
 			for client := range clients {
 				select {
 				case client.Send <- message.Message:
+					log.Printf("WebSocket: Message sent to client for user %s", message.UserID)
 				default:
 					// Client's send buffer is full, close the connection
+					log.Printf("WebSocket: Client send buffer full for user %s, closing connection", message.UserID)
 					close(client.Send)
 					h.mu.Lock()
 					delete(h.clients[message.UserID], client)
@@ -134,6 +143,8 @@ func (h *Hub) BroadcastToUser(userID string, event ProgressEvent) {
 		log.Printf("WebSocket: Failed to marshal event: %v", err)
 		return
 	}
+
+	log.Printf("WebSocket: Broadcasting event type=%s to user=%s conversion=%s", event.Type, userID, event.ConversionID)
 
 	h.broadcast <- &BroadcastMessage{
 		UserID:  userID,
@@ -164,19 +175,24 @@ func (c *Client) ReadPump() {
 func (c *Client) WritePump() {
 	defer func() {
 		c.Conn.Close()
+		log.Printf("WebSocket: WritePump closed for user %s", c.UserID)
 	}()
 
 	for {
 		message, ok := <-c.Send
 		if !ok {
 			// Hub closed the channel
+			log.Printf("WebSocket: Send channel closed for user %s", c.UserID)
 			c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 			return
 		}
 
+		log.Printf("WebSocket: Writing message to user %s: %s", c.UserID, string(message))
 		err := c.Conn.WriteMessage(websocket.TextMessage, message)
 		if err != nil {
+			log.Printf("WebSocket: Write error for user %s: %v", c.UserID, err)
 			return
 		}
+		log.Printf("WebSocket: Message successfully written to user %s", c.UserID)
 	}
 }

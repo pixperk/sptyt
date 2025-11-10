@@ -2,8 +2,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -69,6 +75,17 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "YouTube not authorized. Please connect your YouTube account first.")
+	}
+
+	// Refresh token if expired or about to expire (within 5 minutes)
+	if time.Until(youtubeToken.ExpiresAt) < 5*time.Minute {
+		log.Printf("ConvertPlaylist: Refreshing YouTube token for user %s (expires in %v)", user.ID, time.Until(youtubeToken.ExpiresAt))
+		refreshedToken, err := h.refreshYouTubeToken(ctx, &youtubeToken)
+		if err != nil {
+			log.Printf("ConvertPlaylist: Failed to refresh YouTube token: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, "YouTube token expired. Please reconnect your YouTube account.")
+		}
+		youtubeToken = *refreshedToken
 	}
 
 	// Parse request body
@@ -219,4 +236,60 @@ func (h *PlaylistHandler) GetUserConversions(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"conversions": conversions,
 	})
+}
+
+// refreshYouTubeToken refreshes an expired YouTube OAuth token
+func (h *PlaylistHandler) refreshYouTubeToken(ctx context.Context, token *models.UserOAuthToken) (*models.UserOAuthToken, error) {
+	clientID := os.Getenv("YOUTUBE_OAUTH_CLIENT_ID")
+	clientSecret := os.Getenv("YOUTUBE_OAUTH_CLIENT_SECRET")
+
+	if clientID == "" || clientSecret == "" {
+		return nil, fmt.Errorf("youtube oauth credentials not configured")
+	}
+
+	// Prepare token refresh request
+	data := url.Values{}
+	data.Set("client_id", clientID)
+	data.Set("client_secret", clientSecret)
+	data.Set("refresh_token", token.RefreshToken)
+	data.Set("grant_type", "refresh_token")
+
+	resp, err := http.Post("https://oauth2.googleapis.com/token", "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("token refresh failed (status %d): %s", resp.StatusCode, body)
+	}
+
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+		TokenType   string `json:"token_type"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("failed to decode token response: %w", err)
+	}
+
+	// Update token in database
+	token.AccessToken = tokenResp.AccessToken
+	token.ExpiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+	token.UpdatedAt = time.Now()
+
+	_, err = h.db.NewUpdate().
+		Model(token).
+		Column("access_token", "expires_at", "updated_at").
+		Where("id = ?", token.ID).
+		Exec(ctx)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to update token in database: %w", err)
+	}
+
+	log.Printf("refreshYouTubeToken: Successfully refreshed token for user %s (new expiry: %v)", token.UserID, token.ExpiresAt)
+	return token, nil
 }

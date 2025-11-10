@@ -211,17 +211,19 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	completedAt := time.Now()
 	conversion.CompletedAt = &completedAt
 
-	_, err = s.db.NewUpdate().
+	result, err := s.db.NewUpdate().
 		Model(conversion).
 		Column("playlist_name", "track_count", "success_count", "failure_count", "youtube_playlist_id", "youtube_playlist_url", "conversion_log", "status", "updated_at", "completed_at").
 		Where("id = ?", conversion.ID).
 		Exec(ctx)
 
 	if err != nil {
-		log.Printf("ConversionService: Failed to update conversion record: %v", err)
+		log.Printf("ConversionService: CRITICAL - Failed to update conversion record: %v", err)
+		return nil, fmt.Errorf("failed to save conversion results: %w", err)
 	}
 
-	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed", conversion.ID, conversion.SuccessCount, conversion.FailureCount)
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed (DB rows affected: %d)", conversion.ID, conversion.SuccessCount, conversion.FailureCount, rowsAffected)
 
 	// Send completed event
 	s.publishProgress(job.UserID, conversion.ID.String(), "completed", "Conversion completed", ws.ProgressData{
