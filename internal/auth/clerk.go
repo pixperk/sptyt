@@ -95,3 +95,14 @@ func GetClerkSessionID(c echo.Context) (string, bool) {
 	sessionID, ok := c.Get("clerk_session_id").(string)
 	return sessionID, ok
 }
+
+// VerifyToken verifies a Clerk JWT token and returns the user ID
+func VerifyToken(c echo.Context, token string) (string, error) {
+	claims, err := jwt.Verify(c.Request().Context(), &jwt.VerifyParams{
+		Token: token,
+	})
+	if err != nil {
+		return "", err
+	}
+	return claims.Subject, nil
+}
