@@ -15,6 +15,7 @@ import (
 	"github.com/pixperk/sptyt/internal/genius"
 	"github.com/pixperk/sptyt/internal/handlers"
 	custommw "github.com/pixperk/sptyt/internal/middleware"
+	"github.com/pixperk/sptyt/internal/services"
 	"github.com/pixperk/sptyt/internal/spotify"
 	"github.com/pixperk/sptyt/internal/youtube"
 )
@@ -66,6 +67,9 @@ func main() {
 	geniusClient := genius.NewClient(geniusAccessToken)
 	handler := handlers.NewHandler(spotifyClient, youtubeClient, geniusClient, redisCache)
 
+	// Initialize playlist conversion service
+	converterService := services.NewPlaylistConverterService(cfg.DB, spotifyClient, youtubeClient)
+
 	e := echo.New()
 
 	e.Use(middleware.Logger())
@@ -95,6 +99,7 @@ func main() {
 		clerkMiddleware := auth.NewClerkMiddleware(cfg.ClerkSecretKey)
 		protectedHandler := handlers.NewProtectedHandler(handler, cfg.DB)
 		youtubeOAuthHandler := handlers.NewYouTubeOAuthHandler(cfg.DB, redisCache)
+		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService)
 
 		// Create protected API group
 		api := e.Group("/api")
@@ -110,6 +115,11 @@ func main() {
 		api.GET("/auth/youtube/authorize", youtubeOAuthHandler.Authorize)
 		api.GET("/auth/youtube/callback", youtubeOAuthHandler.Callback)
 		api.GET("/auth/youtube/status", youtubeOAuthHandler.GetYouTubeAuthStatus)
+
+		// Playlist conversion endpoints
+		api.POST("/playlists/convert", playlistHandler.ConvertPlaylist)
+		api.GET("/playlists/conversions", playlistHandler.GetUserConversions)
+		api.GET("/playlists/conversions/:id", playlistHandler.GetConversionStatus)
 
 		log.Println("Clerk authentication enabled - /api/me route available")
 	} else {
