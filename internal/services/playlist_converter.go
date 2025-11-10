@@ -45,6 +45,7 @@ type ConversionJob struct {
 }
 
 type TrackMatchResult struct {
+	Index       int // Original position in Spotify playlist
 	Track       *spotify.PlaylistTrack
 	YouTubeURL  string
 	VideoID     string
@@ -61,9 +62,9 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	}
 
 	// Get existing conversion record (created by handler)
-	var conversion models.PlaylistConversion
+	conversion := &models.PlaylistConversion{}
 	err = s.db.NewSelect().
-		Model(&conversion).
+		Model(conversion).
 		Where("id = ?", conversionID).
 		Scan(ctx)
 
@@ -213,13 +214,19 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 		YouTubePlaylistURL: conversion.YouTubePlaylistURL,
 	})
 
-	return &conversion, nil
+	return conversion, nil
+}
+
+// JobWithIndex wraps a track with its original index
+type JobWithIndex struct {
+	Index int
+	Track *spotify.PlaylistTrack
 }
 
 // matchTracksWithWorkerPool uses a worker pool to match tracks concurrently
 func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context, tracks []*spotify.PlaylistTrack, useLyricVideos bool, userID string, conversionID string) []TrackMatchResult {
 	// Create channels
-	jobsChan := make(chan *spotify.PlaylistTrack, len(tracks))
+	jobsChan := make(chan JobWithIndex, len(tracks))
 	resultsChan := make(chan TrackMatchResult, len(tracks))
 
 	totalTracks := len(tracks)
@@ -233,9 +240,9 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 		go s.trackMatchWorker(ctx, i, jobsChan, resultsChan, useLyricVideos, &wg)
 	}
 
-	// Send jobs to workers
-	for _, track := range tracks {
-		jobsChan <- track
+	// Send jobs to workers with their original indices
+	for i, track := range tracks {
+		jobsChan <- JobWithIndex{Index: i, Track: track}
 	}
 	close(jobsChan)
 
@@ -270,23 +277,34 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 		}
 	}
 
+	// Sort results by original index to maintain Spotify playlist order
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[i].Index > results[j].Index {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
 	return results
 }
 
 // trackMatchWorker is a worker goroutine that matches tracks to YouTube videos
-func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerID int, jobs <-chan *spotify.PlaylistTrack, results chan<- TrackMatchResult, useLyricVideos bool, wg *sync.WaitGroup) {
+func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerID int, jobs <-chan JobWithIndex, results chan<- TrackMatchResult, useLyricVideos bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	for track := range jobs {
+	for job := range jobs {
 		select {
 		case <-ctx.Done():
 			results <- TrackMatchResult{
-				Track: track,
+				Index: job.Index,
+				Track: job.Track,
 				Error: ctx.Err(),
 			}
 			return
 		default:
-			result := s.matchTrackToYouTube(ctx, track, useLyricVideos)
+			result := s.matchTrackToYouTube(ctx, job.Track, useLyricVideos)
+			result.Index = job.Index // Preserve the original index
 			results <- result
 		}
 	}
