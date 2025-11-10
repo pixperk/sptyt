@@ -39,6 +39,8 @@ func main() {
 	youtubeAPIKey := os.Getenv("YOUTUBE_API_KEY")
 	geniusAccessToken := os.Getenv("GENIUS_ACCESS_TOKEN")
 	redisURL := os.Getenv("REDIS_URL")
+	asynqRedisAddr := os.Getenv("ASYNQ_REDIS_ADDR")
+	asynqRedisPassword := os.Getenv("ASYNQ_REDIS_PASSWORD")
 	rateLimitStr := os.Getenv("RATE_LIMIT_PER_MINUTE")
 
 	if spotifyClientID == "" || spotifyClientSecret == "" || youtubeAPIKey == "" || geniusAccessToken == "" {
@@ -47,6 +49,10 @@ func main() {
 
 	if redisURL == "" {
 		redisURL = "redis://localhost:6379"
+	}
+
+	if asynqRedisAddr == "" {
+		asynqRedisAddr = "localhost:6379"
 	}
 
 	rateLimit := 60
@@ -74,14 +80,14 @@ func main() {
 	go wsHub.Run()
 
 	// Initialize Asynq task client
-	taskClient := tasks.NewClient(redisURL)
+	taskClient := tasks.NewClient(asynqRedisAddr, asynqRedisPassword)
 	defer taskClient.Close()
 
 	// Initialize playlist conversion service with WebSocket hub
 	converterService := services.NewPlaylistConverterService(cfg.DB, spotifyClient, youtubeClient, wsHub)
 
 	// Start Asynq task server in background
-	taskServer := tasks.NewServer(redisURL, converterService, 10) // 10 concurrent workers
+	taskServer := tasks.NewServer(asynqRedisAddr, asynqRedisPassword, converterService, 10) // 10 concurrent workers
 	go func() {
 		if err := taskServer.Start(); err != nil {
 			log.Fatalf("Asynq server failed: %v", err)
@@ -95,7 +101,11 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(rateLimiter.Middleware())
 	e.Use(custommw.MobileAppRedirect())
-	e.Use(middleware.CORS())
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:     []string{"https://sptyt.xyz", "http://localhost:3000"},
+		AllowCredentials: true,
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	}))
 
 	// Static files
 	e.Static("/static", "web/static")
@@ -125,6 +135,9 @@ func main() {
 		// YouTube OAuth callback (NO AUTH REQUIRED - uses state token)
 		e.GET("/api/auth/youtube/callback", youtubeOAuthHandler.Callback)
 
+		// WebSocket endpoint for real-time progress (handles auth via token query param)
+		e.GET("/api/ws/playlist-progress", wsHandler.HandleConnection)
+
 		// Create protected API group
 		api := e.Group("/api")
 		api.Use(clerkMiddleware.RequireAuth())
@@ -134,9 +147,6 @@ func main() {
 		api.POST("/checkout", protectedHandler.CreateCheckoutSession)
 		api.POST("/subscription/cancel", protectedHandler.CancelSubscription)
 		api.GET("/payment/return", protectedHandler.PaymentReturn)
-
-		// WebSocket endpoint for real-time progress
-		api.GET("/ws/playlist-progress", wsHandler.HandleConnection)
 
 		// YouTube OAuth endpoints (protected - except callback above)
 		api.GET("/auth/youtube/authorize", youtubeOAuthHandler.Authorize)

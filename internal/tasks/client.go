@@ -10,10 +10,15 @@ type Client struct {
 }
 
 // NewClient creates a new task client
-func NewClient(redisURL string) *Client {
-	client := asynq.NewClient(asynq.RedisClientOpt{
-		Addr: parseRedisAddr(redisURL),
-	})
+func NewClient(redisAddr, redisPassword string) *Client {
+	redisOpt := asynq.RedisClientOpt{
+		Addr: redisAddr,
+	}
+	if redisPassword != "" {
+		redisOpt.Password = redisPassword
+	}
+
+	client := asynq.NewClient(redisOpt)
 	return &Client{
 		client: client,
 	}

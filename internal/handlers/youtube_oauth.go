@@ -112,12 +112,12 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 
 	if errorParam != "" {
 		log.Printf("YouTubeOAuth: Authorization error: %s", errorParam)
-		redirectURL := fmt.Sprintf("%s/playlists?youtube_auth=error&error=%s", frontendURL, url.QueryEscape(errorParam))
+		redirectURL := fmt.Sprintf("%s/playlist?youtube_auth=error&error=%s", frontendURL, url.QueryEscape(errorParam))
 		return c.Redirect(http.StatusFound, redirectURL)
 	}
 
 	if code == "" {
-		redirectURL := fmt.Sprintf("%s/playlists?youtube_auth=error&error=missing_code", frontendURL)
+		redirectURL := fmt.Sprintf("%s/playlist?youtube_auth=error&error=missing_code", frontendURL)
 		return c.Redirect(http.StatusFound, redirectURL)
 	}
 
@@ -192,7 +192,7 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	log.Printf("YouTubeOAuth: Successfully saved OAuth token for user %s", user.ID)
 
 	// Redirect to frontend with success indicator
-	redirectURL := fmt.Sprintf("%s/playlists?youtube_auth=success", frontendURL)
+	redirectURL := fmt.Sprintf("%s/playlist?youtube_auth=success", frontendURL)
 	return c.Redirect(http.StatusFound, redirectURL)
 }
 

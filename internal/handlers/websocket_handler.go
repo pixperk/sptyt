@@ -17,6 +17,8 @@ var upgrader = websocket.Upgrader{
 		// In production, validate the origin properly
 		return true
 	},
+	// Accept authorization token via subprotocol
+	Subprotocols: []string{"authorization"},
 }
 
 // WebSocketHandler handles WebSocket connections
@@ -33,14 +35,31 @@ func NewWebSocketHandler(hub *ws.Hub) *WebSocketHandler {
 
 // HandleConnection handles WebSocket connection requests
 func (h *WebSocketHandler) HandleConnection(c echo.Context) error {
-	// Get authenticated user
-	clerkUserID, ok := auth.GetClerkUserID(c)
-	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	// Get token from Sec-WebSocket-Protocol header (subprotocol)
+	// Format: "authorization, <token>"
+	var clerkUserID string
+	subprotocols := c.Request().Header.Get("Sec-WebSocket-Protocol")
+
+	if subprotocols != "" && len(subprotocols) > len("authorization, ") {
+		// Extract token from "authorization, token" format
+		token := subprotocols[len("authorization, "):]
+
+		// Verify the token
+		var err error
+		clerkUserID, err = auth.VerifyToken(c, token)
+		if err != nil {
+			log.Printf("WebSocket: Token verification failed: %v", err)
+			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid authentication token")
+		}
+	} else {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Missing authentication token in subprotocol")
 	}
 
-	// Upgrade HTTP connection to WebSocket
-	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	// Upgrade HTTP connection to WebSocket with authorization subprotocol
+	responseHeader := http.Header{}
+	responseHeader.Set("Sec-WebSocket-Protocol", "authorization")
+
+	conn, err := upgrader.Upgrade(c.Response(), c.Request(), responseHeader)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
 		return err

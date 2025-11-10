@@ -15,9 +15,16 @@ type Server struct {
 }
 
 // NewServer creates a new task server
-func NewServer(redisURL string, converterService *services.PlaylistConverterService, concurrency int) *Server {
+func NewServer(redisAddr, redisPassword string, converterService *services.PlaylistConverterService, concurrency int) *Server {
+	redisOpt := asynq.RedisClientOpt{
+		Addr: redisAddr,
+	}
+	if redisPassword != "" {
+		redisOpt.Password = redisPassword
+	}
+
 	server := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: parseRedisAddr(redisURL)},
+		redisOpt,
 		asynq.Config{
 			Concurrency: concurrency, // Number of concurrent workers
 			Queues: map[string]int{
