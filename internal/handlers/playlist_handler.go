@@ -81,16 +81,16 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "spotify_playlist_url is required")
 	}
 
-	// Extract Spotify playlist ID from URL
-	playlistID, err := utils.ExtractSpotifyPlaylistID(req.SpotifyPlaylistURL)
+	// Extract Spotify playlist/album ID and type from URL
+	spotifyID, spotifyType, err := utils.ExtractSpotifyPlaylistID(req.SpotifyPlaylistURL)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Spotify playlist URL")
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Spotify playlist/album URL")
 	}
 
-	log.Printf("ConvertPlaylist: User %s converting playlist %s", user.ID, playlistID)
+	log.Printf("ConvertPlaylist: User %s converting %s %s", user.ID, spotifyType, spotifyID)
 
-	// Fetch playlist to check track count BEFORE starting conversion
-	spotifyPlaylist, err := h.converterService.FetchPlaylistInfo(ctx, playlistID)
+	// Fetch playlist/album to check track count BEFORE starting conversion
+	spotifyPlaylist, err := h.converterService.FetchPlaylistInfo(ctx, spotifyID, spotifyType)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Failed to fetch Spotify playlist. Make sure it's a valid public playlist.")
 	}
@@ -104,7 +104,7 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 	conversion := &models.PlaylistConversion{
 		ID:                 uuid.New(),
 		UserID:             user.ID,
-		SpotifyPlaylistID:  playlistID,
+		SpotifyPlaylistID:  spotifyID,
 		SpotifyPlaylistURL: req.SpotifyPlaylistURL,
 		PlaylistName:       spotifyPlaylist.Name,
 		TrackCount:         spotifyPlaylist.TrackCount,
@@ -124,7 +124,8 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 	payload := tasks.PlaylistConversionPayload{
 		ConversionID:        conversion.ID.String(),
 		UserID:              user.ID.String(),
-		SpotifyPlaylistID:   playlistID,
+		SpotifyPlaylistID:   spotifyID,
+		SpotifyType:         spotifyType,
 		SpotifyPlaylistURL:  req.SpotifyPlaylistURL,
 		YouTubeAccessToken:  youtubeToken.AccessToken,
 		YouTubePlaylistName: req.YouTubePlaylistName,

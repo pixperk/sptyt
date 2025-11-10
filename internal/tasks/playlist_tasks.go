@@ -20,6 +20,7 @@ type PlaylistConversionPayload struct {
 	ConversionID        string `json:"conversion_id"`
 	UserID              string `json:"user_id"`
 	SpotifyPlaylistID   string `json:"spotify_playlist_id"`
+	SpotifyType         string `json:"spotify_type"` // "playlist" or "album"
 	SpotifyPlaylistURL  string `json:"spotify_playlist_url"`
 	YouTubeAccessToken  string `json:"youtube_access_token"`
 	YouTubePlaylistName string `json:"youtube_playlist_name"`
@@ -60,6 +61,7 @@ func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Cont
 		ConversionID:        payload.ConversionID,
 		UserID:              payload.UserID,
 		SpotifyPlaylistID:   payload.SpotifyPlaylistID,
+		SpotifyType:         payload.SpotifyType,
 		SpotifyPlaylistURL:  payload.SpotifyPlaylistURL,
 		YouTubeAccessToken:  payload.YouTubeAccessToken,
 		YouTubePlaylistName: payload.YouTubePlaylistName,

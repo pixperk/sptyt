@@ -161,3 +161,154 @@ func (c *Client) GetPlaylistTracks(ctx context.Context, playlistID string) ([]*P
 
 	return allTracks, nil
 }
+
+// GetAlbum fetches album metadata from Spotify
+func (c *Client) GetAlbum(ctx context.Context, albumID string) (*Playlist, error) {
+	if err := c.authenticate(ctx); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	token := c.accessToken
+	c.mu.RUnlock()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.spotify.com/v1/albums/"+albumID, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("spotify album api failed (status %d): %s", resp.StatusCode, body)
+	}
+
+	var albumResp struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Tracks struct {
+			Total int `json:"total"`
+		} `json:"tracks"`
+		Artists []struct {
+			Name string `json:"name"`
+		} `json:"artists"`
+		Images []PlaylistImage `json:"images"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&albumResp); err != nil {
+		return nil, err
+	}
+
+	artistNames := make([]string, len(albumResp.Artists))
+	for i, artist := range albumResp.Artists {
+		artistNames[i] = artist.Name
+	}
+
+	return &Playlist{
+		ID:          albumResp.ID,
+		Name:        albumResp.Name,
+		Description: fmt.Sprintf("Album by %s", fmt.Sprintf("%v", artistNames)),
+		TrackCount:  albumResp.Tracks.Total,
+		Owner:       fmt.Sprintf("%v", artistNames),
+		Images:      albumResp.Images,
+	}, nil
+}
+
+// GetAlbumTracks fetches all tracks from a Spotify album
+func (c *Client) GetAlbumTracks(ctx context.Context, albumID string) ([]*PlaylistTrack, error) {
+	if err := c.authenticate(ctx); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	token := c.accessToken
+	c.mu.RUnlock()
+
+	var allTracks []*PlaylistTrack
+	offset := 0
+	limit := 50 // Spotify max limit for album tracks
+
+	for {
+		query := url.Values{}
+		query.Set("offset", fmt.Sprintf("%d", offset))
+		query.Set("limit", fmt.Sprintf("%d", limit))
+
+		apiURL := fmt.Sprintf("https://api.spotify.com/v1/albums/%s/tracks?%s", albumID, query.Encode())
+		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("spotify album tracks api failed (status %d): %s", resp.StatusCode, body)
+		}
+
+		var tracksResp struct {
+			Items []struct {
+				ID      string `json:"id"`
+				Name    string `json:"name"`
+				Artists []struct {
+					Name string `json:"name"`
+				} `json:"artists"`
+				ExternalIds struct {
+					ISRC string `json:"isrc"`
+				} `json:"external_ids"`
+			} `json:"items"`
+			Next   *string `json:"next"`
+			Offset int     `json:"offset"`
+			Limit  int     `json:"limit"`
+			Total  int     `json:"total"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&tracksResp); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+		resp.Body.Close()
+
+		// Process tracks from this page
+		for i, item := range tracksResp.Items {
+			if item.ID == "" {
+				continue
+			}
+
+			artists := make([]string, len(item.Artists))
+			for j, artist := range item.Artists {
+				artists[j] = artist.Name
+			}
+
+			allTracks = append(allTracks, &PlaylistTrack{
+				ID:       item.ID,
+				Name:     item.Name,
+				Artists:  artists,
+				ISRC:     item.ExternalIds.ISRC,
+				Position: offset + i,
+			})
+		}
+
+		// Check if there are more pages
+		if tracksResp.Next == nil {
+			break
+		}
+
+		offset += limit
+	}
+
+	return allTracks, nil
+}

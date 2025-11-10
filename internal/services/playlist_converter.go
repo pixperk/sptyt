@@ -35,13 +35,14 @@ func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, yout
 }
 
 type ConversionJob struct {
-	ConversionID       string
-	UserID             string
-	SpotifyPlaylistID  string
-	SpotifyPlaylistURL string
-	YouTubeAccessToken string
+	ConversionID        string
+	UserID              string
+	SpotifyPlaylistID   string
+	SpotifyType         string // "playlist" or "album"
+	SpotifyPlaylistURL  string
+	YouTubeAccessToken  string
 	YouTubePlaylistName string
-	UseLyricVideos     bool
+	UseLyricVideos      bool
 }
 
 type TrackMatchResult struct {
@@ -77,25 +78,43 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	// Send started event
 	s.publishProgress(job.UserID, conversion.ID.String(), "started", "Conversion started", nil)
 
-	// Fetch Spotify playlist
-	playlist, err := s.spotifyClient.GetPlaylist(ctx, job.SpotifyPlaylistID)
-	if err != nil {
-		s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to fetch Spotify playlist: %v", err))
-		return nil, fmt.Errorf("failed to fetch playlist: %w", err)
+	// Fetch Spotify content (playlist or album)
+	var playlist *spotify.Playlist
+	var tracks []*spotify.PlaylistTrack
+
+	if job.SpotifyType == "album" {
+		// Fetch album metadata
+		playlist, err = s.spotifyClient.GetAlbum(ctx, job.SpotifyPlaylistID)
+		if err != nil {
+			s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to fetch Spotify album: %v", err))
+			return nil, fmt.Errorf("failed to fetch album: %w", err)
+		}
+
+		// Fetch album tracks
+		tracks, err = s.spotifyClient.GetAlbumTracks(ctx, job.SpotifyPlaylistID)
+		if err != nil {
+			s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to fetch album tracks: %v", err))
+			return nil, fmt.Errorf("failed to fetch tracks: %w", err)
+		}
+	} else {
+		// Fetch playlist metadata
+		playlist, err = s.spotifyClient.GetPlaylist(ctx, job.SpotifyPlaylistID)
+		if err != nil {
+			s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to fetch Spotify playlist: %v", err))
+			return nil, fmt.Errorf("failed to fetch playlist: %w", err)
+		}
+
+		// Fetch playlist tracks
+		tracks, err = s.spotifyClient.GetPlaylistTracks(ctx, job.SpotifyPlaylistID)
+		if err != nil {
+			s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to fetch playlist tracks: %v", err))
+			return nil, fmt.Errorf("failed to fetch tracks: %w", err)
+		}
 	}
 
 	conversion.PlaylistName = playlist.Name
-	conversion.TrackCount = playlist.TrackCount
-
-	// Fetch all tracks
-	tracks, err := s.spotifyClient.GetPlaylistTracks(ctx, job.SpotifyPlaylistID)
-	if err != nil {
-		s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to fetch playlist tracks: %v", err))
-		return nil, fmt.Errorf("failed to fetch tracks: %w", err)
-	}
-
 	conversion.TrackCount = len(tracks)
-	log.Printf("ConversionService: Fetched %d tracks from Spotify", len(tracks))
+	log.Printf("ConversionService: Fetched %d tracks from Spotify %s", len(tracks), job.SpotifyType)
 
 	// Send progress: tracks fetched
 	s.publishProgress(job.UserID, conversion.ID.String(), "progress", "Fetched tracks from Spotify", ws.ProgressData{
@@ -424,8 +443,11 @@ func (s *PlaylistConverterService) GetUserConversions(ctx context.Context, userI
 }
 
 // FetchPlaylistInfo fetches basic playlist info from Spotify
-func (s *PlaylistConverterService) FetchPlaylistInfo(ctx context.Context, playlistID string) (*spotify.Playlist, error) {
-	return s.spotifyClient.GetPlaylist(ctx, playlistID)
+func (s *PlaylistConverterService) FetchPlaylistInfo(ctx context.Context, spotifyID string, spotifyType string) (*spotify.Playlist, error) {
+	if spotifyType == "album" {
+		return s.spotifyClient.GetAlbum(ctx, spotifyID)
+	}
+	return s.spotifyClient.GetPlaylist(ctx, spotifyID)
 }
 
 // publishProgress sends progress updates via WebSocket
