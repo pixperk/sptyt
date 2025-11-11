@@ -103,42 +103,53 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 	}
 }
 
-// getMonthlyConversionCount gets the number of conversions this month for a user
+// getMonthlyConversionCount gets the number of conversions this month for a user from analytics
 func (pl *PlaylistLimiter) getMonthlyConversionCount(ctx context.Context, userID interface{}) (int, error) {
-	// Calculate start of current month
 	now := time.Now()
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	currentMonth := int(now.Month())
+	currentYear := now.Year()
 
 	// Try to get from cache first
-	cacheKey := fmt.Sprintf("playlist_conversions:%v:%s", userID, startOfMonth.Format("2006-01"))
+	cacheKey := fmt.Sprintf("monthly_conversions:%v:%d-%d", userID, currentYear, currentMonth)
 	if cached, err := pl.cache.Get(ctx, cacheKey); err == nil {
 		var count int
 		fmt.Sscanf(cached, "%d", &count)
 		return count, nil
 	}
 
-	// Get from database
-	count, err := pl.db.NewSelect().
-		Model((*models.PlaylistConversion)(nil)).
+	// Get from analytics table
+	var analytics models.UserAnalytics
+	err := pl.db.NewSelect().
+		Model(&analytics).
 		Where("user_id = ?", userID).
-		Where("created_at >= ?", startOfMonth).
-		Count(ctx)
+		Scan(ctx)
 
 	if err != nil {
-		return 0, err
+		// No analytics record yet, return 0
+		return 0, nil
 	}
 
-	// Cache for 1 hour
-	pl.cache.Set(ctx, cacheKey, fmt.Sprintf("%d", count), 1*time.Hour)
+	// Check if the analytics record is for the current month
+	var count int
+	if analytics.CurrentMonth == currentMonth && analytics.CurrentYear == currentYear {
+		count = analytics.MonthlyConversions
+	} else {
+		// Old month data, effectively 0 for this month
+		count = 0
+	}
+
+	// Cache for 5 minutes (short cache since this changes frequently)
+	pl.cache.Set(ctx, cacheKey, fmt.Sprintf("%d", count), 5*time.Minute)
 
 	return count, nil
 }
 
-// IncrementMonthlyConversionCount increments the monthly conversion count
+// IncrementMonthlyConversionCount invalidates the cache for monthly conversion count
 func (pl *PlaylistLimiter) IncrementMonthlyConversionCount(ctx context.Context, userID interface{}) error {
 	now := time.Now()
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	cacheKey := fmt.Sprintf("playlist_conversions:%v:%s", userID, startOfMonth.Format("2006-01"))
+	currentMonth := int(now.Month())
+	currentYear := now.Year()
+	cacheKey := fmt.Sprintf("monthly_conversions:%v:%d-%d", userID, currentYear, currentMonth)
 
 	// Invalidate cache
 	return pl.cache.Delete(ctx, cacheKey)

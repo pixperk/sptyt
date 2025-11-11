@@ -161,6 +161,7 @@ func main() {
 
 		// Analytics endpoints
 		api.GET("/analytics", analyticsHandler.GetUserAnalytics)
+		api.GET("/analytics/monthly", analyticsHandler.GetMonthlyStats)
 		api.GET("/dashboard", analyticsHandler.GetUserDashboard)
 
 		log.Println("Clerk authentication enabled - /api/me route available")

@@ -31,6 +31,11 @@ type UserAnalytics struct {
 	// Custom links (for future feature)
 	TotalCustomLinks int `bun:",default:0" json:"total_custom_links"`
 
+	// Monthly usage tracking (for subscription limits)
+	MonthlyConversions int `bun:",default:0" json:"monthly_conversions"`
+	CurrentMonth       int `bun:",default:0" json:"current_month"` // 1-12
+	CurrentYear        int `bun:",default:0" json:"current_year"`  // e.g., 2025
+
 	// Time tracking
 	FirstConversionAt *time.Time `bun:",nullzero" json:"first_conversion_at,omitempty"`
 	LastConversionAt  *time.Time `bun:",nullzero" json:"last_conversion_at,omitempty"`

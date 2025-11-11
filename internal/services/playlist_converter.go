@@ -511,6 +511,9 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 			TotalTracksProcessed: trackCount,
 			TotalTracksMatched:   successCount,
 			TotalTracksFailed:    failureCount,
+			MonthlyConversions:   1,
+			CurrentMonth:         int(now.Month()),
+			CurrentYear:          now.Year(),
 			FirstConversionAt:    &now,
 			LastConversionAt:     &now,
 			CreatedAt:            now,
@@ -542,6 +545,19 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 		Set("total_tracks_failed = total_tracks_failed + ?", failureCount).
 		Set("last_conversion_at = ?", now).
 		Set("updated_at = ?", now)
+
+	// Check if we need to reset monthly counter (new month)
+	currentMonth := int(now.Month())
+	currentYear := now.Year()
+	if analytics.CurrentMonth != currentMonth || analytics.CurrentYear != currentYear {
+		// New month, reset counter
+		update = update.Set("monthly_conversions = 1").
+			Set("current_month = ?", currentMonth).
+			Set("current_year = ?", currentYear)
+	} else {
+		// Same month, increment
+		update = update.Set("monthly_conversions = monthly_conversions + 1")
+	}
 
 	if isSuccess {
 		update = update.Set("successful_conversions = successful_conversions + 1")
