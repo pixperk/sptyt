@@ -234,7 +234,7 @@ func (h *YouTubeOAuthHandler) exchangeCodeForToken(ctx context.Context, code str
 	return &tokenResp, nil
 }
 
-// GetYouTubeAuthStatus checks if user has authorized YouTube
+// GetYouTubeAuthStatus checks if user has authorized YouTube and returns account details
 func (h *YouTubeOAuthHandler) GetYouTubeAuthStatus(c echo.Context) error {
 	clerkUserID, ok := auth.GetClerkUserID(c)
 	if !ok {
@@ -264,13 +264,85 @@ func (h *YouTubeOAuthHandler) GetYouTubeAuthStatus(c echo.Context) error {
 	if err != nil {
 		// No token found
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"authorized": false,
+			"authorized":       false,
+			"connected_at":     nil,
+			"expires_at":       nil,
+			"is_expired":       false,
+			"needs_reconnect":  false,
+			"has_refresh_token": false,
 		})
 	}
 
+	// Check if token is expired or expiring soon (within 5 minutes)
+	isExpired := token.IsExpired()
+	expiresWithin5Min := time.Until(token.ExpiresAt) < 5*time.Minute
+	needsReconnect := isExpired || expiresWithin5Min || token.RefreshToken == ""
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"authorized": true,
-		"expires_at": token.ExpiresAt,
-		"is_expired": token.IsExpired(),
+		"authorized":         true,
+		"provider":           "youtube",
+		"connected_at":       token.CreatedAt,
+		"last_updated":       token.UpdatedAt,
+		"expires_at":         token.ExpiresAt,
+		"is_expired":         isExpired,
+		"expires_soon":       expiresWithin5Min,
+		"needs_reconnect":    needsReconnect,
+		"has_refresh_token":  token.RefreshToken != "",
+		"scope":              token.Scope,
+		"time_until_expiry":  time.Until(token.ExpiresAt).String(),
 	})
+}
+
+// DisconnectYouTube removes the YouTube OAuth connection for the user
+func (h *YouTubeOAuthHandler) DisconnectYouTube(c echo.Context) error {
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	ctx := context.Background()
+
+	// Get user from database
+	var user models.User
+	err := h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+
+	if err != nil {
+		log.Printf("DisconnectYouTube: Failed to get user: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Delete the OAuth token
+	result, err := h.db.NewDelete().
+		Model((*models.UserOAuthToken)(nil)).
+		Where("user_id = ? AND provider = ?", user.ID, "youtube").
+		Exec(ctx)
+
+	if err != nil {
+		log.Printf("DisconnectYouTube: Failed to delete token: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to disconnect YouTube")
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+
+	if rowsAffected == 0 {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "No YouTube connection found",
+		})
+	}
+
+	log.Printf("DisconnectYouTube: Successfully disconnected YouTube for user %s", user.ID)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "YouTube account disconnected successfully",
+	})
+}
+
+// ReconnectYouTube is an alias for Authorize - it's the same flow
+func (h *YouTubeOAuthHandler) ReconnectYouTube(c echo.Context) error {
+	return h.Authorize(c)
 }

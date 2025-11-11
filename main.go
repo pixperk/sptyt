@@ -151,7 +151,9 @@ func main() {
 
 		// YouTube OAuth endpoints (protected - except callback above)
 		api.GET("/auth/youtube/authorize", youtubeOAuthHandler.Authorize)
+		api.GET("/auth/youtube/reconnect", youtubeOAuthHandler.ReconnectYouTube)
 		api.GET("/auth/youtube/status", youtubeOAuthHandler.GetYouTubeAuthStatus)
+		api.DELETE("/auth/youtube/disconnect", youtubeOAuthHandler.DisconnectYouTube)
 
 		// Playlist conversion endpoints (with rate limiting)
 		api.GET("/playlists/limits", playlistLimiter.GetUserLimitsInfo)
