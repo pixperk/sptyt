@@ -157,6 +157,13 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start conversion")
 	}
 
+	// Immediately increment monthly conversion counter for limit checking
+	// This prevents users from bypassing limits by making concurrent requests
+	if err := h.incrementMonthlyCounter(ctx, user.ID); err != nil {
+		log.Printf("ConvertPlaylist: Warning - failed to increment monthly counter: %v", err)
+		// Don't fail the request if this fails, just log it
+	}
+
 	log.Printf("ConvertPlaylist: Enqueued conversion task %s for user %s", conversion.ID, user.ID)
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
@@ -416,4 +423,51 @@ func (h *PlaylistHandler) refreshYouTubeToken(ctx context.Context, token *models
 
 	log.Printf("refreshYouTubeToken: Successfully refreshed token for user %s (new expiry: %v)", token.UserID, token.ExpiresAt)
 	return token, nil
+}
+
+// incrementMonthlyCounter immediately increments the monthly conversion counter for a user
+func (h *PlaylistHandler) incrementMonthlyCounter(ctx context.Context, userID uuid.UUID) error {
+	now := time.Now()
+	currentMonth := int(now.Month())
+	currentYear := now.Year()
+
+	// Try to get existing analytics record
+	var analytics models.UserAnalytics
+	err := h.db.NewSelect().
+		Model(&analytics).
+		Where("user_id = ?", userID).
+		Scan(ctx)
+
+	if err != nil {
+		// Record doesn't exist, create it with counter = 1
+		analytics = models.UserAnalytics{
+			UserID:             userID,
+			MonthlyConversions: 1,
+			CurrentMonth:       currentMonth,
+			CurrentYear:        currentYear,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}
+		_, err = h.db.NewInsert().Model(&analytics).Exec(ctx)
+		return err
+	}
+
+	// Record exists, update it
+	update := h.db.NewUpdate().
+		Model(&analytics).
+		Set("updated_at = ?", now)
+
+	// Check if we need to reset monthly counter (new month)
+	if analytics.CurrentMonth != currentMonth || analytics.CurrentYear != currentYear {
+		// New month, reset counter to 1
+		update = update.Set("monthly_conversions = 1").
+			Set("current_month = ?", currentMonth).
+			Set("current_year = ?", currentYear)
+	} else {
+		// Same month, increment
+		update = update.Set("monthly_conversions = monthly_conversions + 1")
+	}
+
+	_, err = update.Where("user_id = ?", userID).Exec(ctx)
+	return err
 }
