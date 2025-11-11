@@ -102,5 +102,30 @@ func RunMigrations(db *bun.DB) {
 		log.Fatalf("Failed to create user_analytics indexes: %v", err)
 	}
 
+	// Add new columns to playlist_conversions table (if they don't exist)
+	_, err = db.Exec(`
+		ALTER TABLE playlist_conversions
+		ADD COLUMN IF NOT EXISTS spotify_cover_image TEXT,
+		ADD COLUMN IF NOT EXISTS youtube_cover_image TEXT;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add cover image columns: %v", err)
+	} else {
+		log.Println("Added cover image columns to playlist_conversions table")
+	}
+
+	// Add new columns to user_analytics table (if they don't exist)
+	_, err = db.Exec(`
+		ALTER TABLE user_analytics
+		ADD COLUMN IF NOT EXISTS monthly_conversions INTEGER DEFAULT 0,
+		ADD COLUMN IF NOT EXISTS current_month INTEGER DEFAULT 0,
+		ADD COLUMN IF NOT EXISTS current_year INTEGER DEFAULT 0;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add monthly tracking columns: %v", err)
+	} else {
+		log.Println("Added monthly tracking columns to user_analytics table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }
