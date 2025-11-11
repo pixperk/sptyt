@@ -332,7 +332,6 @@ func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
 			"spotify_cover_image":   conv.SpotifyCoverImage,
 			"youtube_playlist_id":   conv.YouTubePlaylistID,
 			"youtube_playlist_url":  conv.YouTubePlaylistURL,
-			"youtube_cover_image":   conv.YouTubeCoverImage,
 			"status":                conv.Status,
 			"track_count":           conv.TrackCount,
 			"success_count":         conv.SuccessCount,

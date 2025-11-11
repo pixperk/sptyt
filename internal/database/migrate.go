@@ -102,16 +102,23 @@ func RunMigrations(db *bun.DB) {
 		log.Fatalf("Failed to create user_analytics indexes: %v", err)
 	}
 
-	// Add new columns to playlist_conversions table (if they don't exist)
+	// Add spotify_cover_image column (if it doesn't exist)
 	_, err = db.Exec(`
 		ALTER TABLE playlist_conversions
-		ADD COLUMN IF NOT EXISTS spotify_cover_image TEXT,
-		ADD COLUMN IF NOT EXISTS youtube_cover_image TEXT;
+		ADD COLUMN IF NOT EXISTS spotify_cover_image TEXT;
 	`)
 	if err != nil {
-		log.Printf("Warning: Failed to add cover image columns: %v", err)
+		log.Printf("Warning: Failed to add spotify_cover_image column: %v", err)
 	} else {
-		log.Println("Added cover image columns to playlist_conversions table")
+		log.Println("Added spotify_cover_image column to playlist_conversions table")
+	}
+
+	// Drop youtube_cover_image column if it exists (cleanup)
+	_, err = db.Exec("ALTER TABLE playlist_conversions DROP COLUMN IF EXISTS youtube_cover_image")
+	if err != nil {
+		log.Printf("Warning: Failed to drop youtube_cover_image column: %v", err)
+	} else {
+		log.Println("Dropped youtube_cover_image column from playlist_conversions table")
 	}
 
 	// Add new columns to user_analytics table (if they don't exist)

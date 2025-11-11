@@ -19,7 +19,6 @@ type PlaylistConversion struct {
 
 	PlaylistName      string `bun:",notnull" json:"playlist_name"`
 	SpotifyCoverImage string `bun:"" json:"spotify_cover_image,omitempty"`
-	YouTubeCoverImage string `bun:"" json:"youtube_cover_image,omitempty"`
 	TrackCount        int    `bun:",notnull,default:0" json:"track_count"`
 	SuccessCount      int    `bun:",notnull,default:0" json:"success_count"`
 	FailureCount      int    `bun:",notnull,default:0" json:"failure_count"`
