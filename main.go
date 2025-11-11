@@ -159,6 +159,7 @@ func main() {
 		api.GET("/playlists/limits", playlistLimiter.GetUserLimitsInfo)
 		api.POST("/playlists/convert", playlistHandler.ConvertPlaylist, playlistLimiter.CheckPlaylistConversionLimits())
 		api.GET("/playlists/conversions", playlistHandler.GetUserConversions)
+		api.GET("/playlists/conversions/detailed", playlistHandler.GetDetailedUserConversions)
 		api.GET("/playlists/conversions/:id", playlistHandler.GetConversionStatus)
 
 		// Analytics endpoints

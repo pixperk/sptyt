@@ -239,6 +239,130 @@ func (h *PlaylistHandler) GetUserConversions(c echo.Context) error {
 	})
 }
 
+// GetDetailedUserConversions returns all user conversions with complete song details and covers (with pagination)
+func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
+	// Get authenticated user
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	ctx := context.Background()
+
+	// Get user from database
+	var user models.User
+	err := h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Parse pagination parameters
+	var limit, offset int
+	limitParam := c.QueryParam("limit")
+	offsetParam := c.QueryParam("offset")
+
+	// Default limit: 10, max: 100
+	if limitParam == "" {
+		limit = 10
+	} else {
+		fmt.Sscanf(limitParam, "%d", &limit)
+		if limit <= 0 || limit > 100 {
+			limit = 10
+		}
+	}
+
+	// Default offset: 0
+	if offsetParam == "" {
+		offset = 0
+	} else {
+		fmt.Sscanf(offsetParam, "%d", &offset)
+		if offset < 0 {
+			offset = 0
+		}
+	}
+
+	// Get total count
+	totalCount, err := h.db.NewSelect().
+		Model((*models.PlaylistConversion)(nil)).
+		Where("user_id = ?", user.ID).
+		Count(ctx)
+
+	if err != nil {
+		log.Printf("GetDetailedUserConversions: Failed to count conversions: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get conversions")
+	}
+
+	// Get conversions with pagination
+	var conversions []models.PlaylistConversion
+	err = h.db.NewSelect().
+		Model(&conversions).
+		Where("user_id = ?", user.ID).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Scan(ctx)
+
+	if err != nil {
+		log.Printf("GetDetailedUserConversions: Failed to get conversions: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get conversions")
+	}
+
+	// Build detailed response
+	detailedConversions := make([]map[string]interface{}, len(conversions))
+	for i, conv := range conversions {
+		// Count successful and failed tracks from conversion log
+		var successfulTracks, failedTracks []models.TrackConversionLog
+		for _, track := range conv.ConversionLog {
+			if track.Status == "success" {
+				successfulTracks = append(successfulTracks, track)
+			} else {
+				failedTracks = append(failedTracks, track)
+			}
+		}
+
+		detailedConversions[i] = map[string]interface{}{
+			"id":                    conv.ID,
+			"playlist_name":         conv.PlaylistName,
+			"spotify_playlist_id":   conv.SpotifyPlaylistID,
+			"spotify_playlist_url":  conv.SpotifyPlaylistURL,
+			"spotify_cover_image":   conv.SpotifyCoverImage,
+			"youtube_playlist_id":   conv.YouTubePlaylistID,
+			"youtube_playlist_url":  conv.YouTubePlaylistURL,
+			"youtube_cover_image":   conv.YouTubeCoverImage,
+			"status":                conv.Status,
+			"track_count":           conv.TrackCount,
+			"success_count":         conv.SuccessCount,
+			"failure_count":         conv.FailureCount,
+			"progress_percentage":   conv.GetProgress(),
+			"created_at":            conv.CreatedAt,
+			"updated_at":            conv.UpdatedAt,
+			"completed_at":          conv.CompletedAt,
+			"is_complete":           conv.IsComplete(),
+			"successful_tracks":     successfulTracks,
+			"failed_tracks":         failedTracks,
+			"all_tracks":            conv.ConversionLog,
+		}
+	}
+
+	// Calculate pagination metadata
+	hasMore := offset+len(conversions) < totalCount
+	nextOffset := offset + len(conversions)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"total":       totalCount,
+		"limit":       limit,
+		"offset":      offset,
+		"count":       len(conversions),
+		"has_more":    hasMore,
+		"next_offset": nextOffset,
+		"conversions": detailedConversions,
+	})
+}
+
 // refreshYouTubeToken refreshes an expired YouTube OAuth token
 func (h *PlaylistHandler) refreshYouTubeToken(ctx context.Context, token *models.UserOAuthToken) (*models.UserOAuthToken, error) {
 	clientID := os.Getenv("YOUTUBE_OAUTH_CLIENT_ID")

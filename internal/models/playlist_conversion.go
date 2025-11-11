@@ -17,10 +17,12 @@ type PlaylistConversion struct {
 	YouTubePlaylistID  string    `bun:"column:you_tube_playlist_id" json:"youtube_playlist_id,omitempty"`
 	YouTubePlaylistURL string    `bun:"column:you_tube_playlist_url" json:"youtube_playlist_url,omitempty"`
 
-	PlaylistName string `bun:",notnull" json:"playlist_name"`
-	TrackCount   int    `bun:",notnull,default:0" json:"track_count"`
-	SuccessCount int    `bun:",notnull,default:0" json:"success_count"`
-	FailureCount int    `bun:",notnull,default:0" json:"failure_count"`
+	PlaylistName      string `bun:",notnull" json:"playlist_name"`
+	SpotifyCoverImage string `bun:"" json:"spotify_cover_image,omitempty"`
+	YouTubeCoverImage string `bun:"" json:"youtube_cover_image,omitempty"`
+	TrackCount        int    `bun:",notnull,default:0" json:"track_count"`
+	SuccessCount      int    `bun:",notnull,default:0" json:"success_count"`
+	FailureCount      int    `bun:",notnull,default:0" json:"failure_count"`
 
 	Status        string                   `bun:",notnull,default:'pending'" json:"status"` // pending, processing, completed, failed
 	ConversionLog []TrackConversionLog     `bun:"type:jsonb" json:"conversion_log,omitempty"`
