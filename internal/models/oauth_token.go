@@ -18,6 +18,11 @@ type UserOAuthToken struct {
 	ExpiresAt    time.Time `bun:",notnull" json:"expires_at"`
 	Scope        string    `bun:"" json:"scope"`
 
+	// Google account information
+	AccountEmail   string `bun:"" json:"account_email,omitempty"`
+	AccountName    string `bun:"" json:"account_name,omitempty"`
+	AccountPicture string `bun:"" json:"account_picture,omitempty"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 

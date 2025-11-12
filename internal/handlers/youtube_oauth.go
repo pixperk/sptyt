@@ -146,6 +146,13 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 		log.Printf("YouTubeOAuth: Warning - no refresh token received")
 	}
 
+	// Fetch Google user info
+	userInfo, err := h.fetchGoogleUserInfo(ctx, tokenResp.AccessToken)
+	if err != nil {
+		log.Printf("YouTubeOAuth: Warning - failed to fetch user info: %v", err)
+		// Continue anyway, user info is optional
+	}
+
 	// Get user from database using the clerk ID from state
 	var user models.User
 	err = h.db.NewSelect().
@@ -162,15 +169,18 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	expiresAt := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 
 	oauthToken := &models.UserOAuthToken{
-		ID:           uuid.New(),
-		UserID:       user.ID,
-		Provider:     "youtube",
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		ExpiresAt:    expiresAt,
-		Scope:        youtubeScope,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:             uuid.New(),
+		UserID:         user.ID,
+		Provider:       "youtube",
+		AccessToken:    tokenResp.AccessToken,
+		RefreshToken:   tokenResp.RefreshToken,
+		ExpiresAt:      expiresAt,
+		Scope:          youtubeScope,
+		AccountEmail:   userInfo.Email,
+		AccountName:    userInfo.Name,
+		AccountPicture: userInfo.Picture,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 
 	// Upsert token (insert or update if exists)
@@ -181,6 +191,9 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 		Set("refresh_token = EXCLUDED.refresh_token").
 		Set("expires_at = EXCLUDED.expires_at").
 		Set("scope = EXCLUDED.scope").
+		Set("account_email = EXCLUDED.account_email").
+		Set("account_name = EXCLUDED.account_name").
+		Set("account_picture = EXCLUDED.account_picture").
 		Set("updated_at = EXCLUDED.updated_at").
 		Exec(ctx)
 
@@ -290,6 +303,9 @@ func (h *YouTubeOAuthHandler) GetYouTubeAuthStatus(c echo.Context) error {
 		"has_refresh_token":  token.RefreshToken != "",
 		"scope":              token.Scope,
 		"time_until_expiry":  time.Until(token.ExpiresAt).String(),
+		"account_email":      token.AccountEmail,
+		"account_name":       token.AccountName,
+		"account_picture":    token.AccountPicture,
 	})
 }
 
@@ -345,4 +361,40 @@ func (h *YouTubeOAuthHandler) DisconnectYouTube(c echo.Context) error {
 // ReconnectYouTube is an alias for Authorize - it's the same flow
 func (h *YouTubeOAuthHandler) ReconnectYouTube(c echo.Context) error {
 	return h.Authorize(c)
+}
+
+// googleUserInfo represents the user info from Google's userinfo endpoint
+type googleUserInfo struct {
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+}
+
+// fetchGoogleUserInfo fetches user information from Google's userinfo endpoint
+func (h *YouTubeOAuthHandler) fetchGoogleUserInfo(ctx context.Context, accessToken string) (*googleUserInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch user info (status %d): %s", resp.StatusCode, body)
+	}
+
+	var userInfo googleUserInfo
+	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+		return nil, err
+	}
+
+	return &userInfo, nil
 }

@@ -134,5 +134,18 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Added monthly tracking columns to user_analytics table")
 	}
 
+	// Add Google account info columns to oauth_tokens table (if they don't exist)
+	_, err = db.Exec(`
+		ALTER TABLE oauth_tokens
+		ADD COLUMN IF NOT EXISTS account_email TEXT,
+		ADD COLUMN IF NOT EXISTS account_name TEXT,
+		ADD COLUMN IF NOT EXISTS account_picture TEXT;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add account info columns: %v", err)
+	} else {
+		log.Println("Added account info columns to oauth_tokens table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }
