@@ -158,5 +158,61 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Added counts_against_quota column to playlist_conversions table")
 	}
 
+	// Create custom_links table
+	_, err = db.NewCreateTable().
+		Model((*models.CustomLink)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create custom_links table: %v", err)
+	}
+
+	// Create link_elements table
+	_, err = db.NewCreateTable().
+		Model((*models.LinkElement)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create link_elements table: %v", err)
+	}
+
+	// Create link_analytics table
+	_, err = db.NewCreateTable().
+		Model((*models.LinkAnalytics)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create link_analytics table: %v", err)
+	}
+
+	// Create indexes for custom_links
+	_, err = db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_links_slug ON custom_links(slug);
+		CREATE INDEX IF NOT EXISTS idx_custom_links_user_id ON custom_links(user_id);
+		CREATE INDEX IF NOT EXISTS idx_custom_links_expires_at ON custom_links(expires_at);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create custom_links indexes: %v", err)
+	}
+
+	// Create indexes for link_elements
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_link_elements_custom_link_id ON link_elements(custom_link_id);
+		CREATE INDEX IF NOT EXISTS idx_link_elements_display_index ON link_elements(custom_link_id, display_index);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create link_elements indexes: %v", err)
+	}
+
+	// Create indexes for link_analytics
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_link_analytics_custom_link_id ON link_analytics(custom_link_id);
+		CREATE INDEX IF NOT EXISTS idx_link_analytics_element_id ON link_analytics(link_element_id);
+		CREATE INDEX IF NOT EXISTS idx_link_analytics_created_at ON link_analytics(created_at DESC);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create link_analytics indexes: %v", err)
+	}
+
 	log.Println("Database migrations completed successfully")
 }
