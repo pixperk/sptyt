@@ -33,6 +33,16 @@ type Track struct {
 	ISRC    string
 }
 
+type TrackDetails struct {
+	ID         string
+	Name       string
+	Artists    []string
+	ISRC       string
+	CoverImage string
+	Duration   int // in milliseconds
+	SpotifyURL string
+}
+
 type Playlist struct {
 	ID          string
 	Name        string
@@ -64,6 +74,28 @@ type trackResponse struct {
 	ExternalIds struct {
 		ISRC string `json:"isrc"`
 	} `json:"external_ids"`
+}
+
+type trackDetailsResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DurationMS  int    `json:"duration_ms"`
+	Artists     []struct {
+		Name string `json:"name"`
+	} `json:"artists"`
+	Album       struct {
+		Images []struct {
+			URL    string `json:"url"`
+			Height int    `json:"height"`
+			Width  int    `json:"width"`
+		} `json:"images"`
+	} `json:"album"`
+	ExternalIds struct {
+		ISRC string `json:"isrc"`
+	} `json:"external_ids"`
+	ExternalUrls struct {
+		Spotify string `json:"spotify"`
+	} `json:"external_urls"`
 }
 
 func NewClient(clientID, clientSecret string) *Client {
@@ -184,6 +216,61 @@ func (c *Client) GetTrack(ctx context.Context, trackID string) (*Track, error) {
 		Name:    trackResp.Name,
 		Artists: artists,
 		ISRC:    trackResp.ExternalIds.ISRC,
+	}, nil
+}
+
+// GetTrackDetails returns detailed track information including cover image
+func (c *Client) GetTrackDetails(ctx context.Context, trackID string) (*TrackDetails, error) {
+	if err := c.authenticate(ctx); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	token := c.accessToken
+	c.mu.RUnlock()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.spotify.com/v1/tracks/"+trackID, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("spotify api failed: %s", body)
+	}
+
+	var trackResp trackDetailsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&trackResp); err != nil {
+		return nil, err
+	}
+
+	artists := make([]string, len(trackResp.Artists))
+	for i, artist := range trackResp.Artists {
+		artists[i] = artist.Name
+	}
+
+	// Get the highest quality cover image (usually the first one)
+	coverImage := ""
+	if len(trackResp.Album.Images) > 0 {
+		coverImage = trackResp.Album.Images[0].URL
+	}
+
+	return &TrackDetails{
+		ID:         trackResp.ID,
+		Name:       trackResp.Name,
+		Artists:    artists,
+		ISRC:       trackResp.ExternalIds.ISRC,
+		CoverImage: coverImage,
+		Duration:   trackResp.DurationMS,
+		SpotifyURL: trackResp.ExternalUrls.Spotify,
 	}, nil
 }
 

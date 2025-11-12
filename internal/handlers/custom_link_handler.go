@@ -9,31 +9,41 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
+	"github.com/pixperk/sptyt/internal/spotify"
+	"github.com/pixperk/sptyt/internal/youtube"
+	"github.com/pixperk/sptyt/internal/genius"
 	"github.com/uptrace/bun"
 )
 
 type CustomLinkHandler struct {
-	service     *services.CustomLinkService
-	db          *bun.DB
-	frontendURL string
+	service       *services.CustomLinkService
+	db            *bun.DB
+	frontendURL   string
+	spotifyClient *spotify.Client
+	youtubeClient *youtube.Client
+	geniusClient  *genius.Client
 }
 
-func NewCustomLinkHandler(service *services.CustomLinkService, db *bun.DB) *CustomLinkHandler {
+func NewCustomLinkHandler(service *services.CustomLinkService, db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, geniusClient *genius.Client) *CustomLinkHandler {
 	frontendURL := os.Getenv("FRONTEND_URL")
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
 
 	return &CustomLinkHandler{
-		service:     service,
-		db:          db,
-		frontendURL: frontendURL,
+		service:       service,
+		db:            db,
+		frontendURL:   frontendURL,
+		spotifyClient: spotifyClient,
+		youtubeClient: youtubeClient,
+		geniusClient:  geniusClient,
 	}
 }
 
@@ -531,4 +541,142 @@ func (h *CustomLinkHandler) VerifyLinkPassword(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]bool{"valid": true})
+}
+
+// GetSongElementData fetches element data for a song from Spotify and derives platform links
+func (h *CustomLinkHandler) GetSongElementData(c echo.Context) error {
+	_, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	spotifyURL := c.QueryParam("spotify_url")
+	if spotifyURL == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "spotify_url is required")
+	}
+
+	ctx := context.Background()
+
+	// Extract Spotify track ID from URL
+	trackID := extractSpotifyTrackID(spotifyURL)
+	if trackID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Spotify URL")
+	}
+
+	// Fetch track details from Spotify
+	trackDetails, err := h.spotifyClient.GetTrackDetails(ctx, trackID)
+	if err != nil {
+		log.Printf("Failed to fetch track details: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch track details")
+	}
+
+	// Get primary artist (first one)
+	primaryArtist := ""
+	if len(trackDetails.Artists) > 0 {
+		primaryArtist = trackDetails.Artists[0]
+	}
+
+	// Search for YouTube music video
+	youtubeURL, _ := h.youtubeClient.SearchOfficialMV(ctx, trackDetails.Name, primaryArtist)
+
+	// Search for YouTube lyric video
+	youtubeLyricURL, _ := h.youtubeClient.SearchLyricVideo(ctx, trackDetails.Name, primaryArtist)
+
+	// Search for Genius lyrics
+	geniusURL, _ := h.geniusClient.SearchLyrics(ctx, trackDetails.Name, primaryArtist)
+
+	// Format duration
+	durationStr := formatDuration(trackDetails.Duration)
+
+	elementData := models.ElementData{
+		Title:            trackDetails.Name,
+		Artists:          strings.Join(trackDetails.Artists, ", "),
+		CoverImage:       trackDetails.CoverImage,
+		Duration:         durationStr,
+		SpotifyURL:       trackDetails.SpotifyURL,
+		YouTubeURL:       youtubeURL,
+		YouTubeLyricURL:  youtubeLyricURL,
+		GeniusURL:        geniusURL,
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"element_type": "song",
+		"element_data": elementData,
+	})
+}
+
+// Helper function to extract Spotify track ID from URL
+func extractSpotifyTrackID(spotifyURL string) string {
+	// Handle different Spotify URL formats
+	// https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp
+	// spotify:track:3n3Ppam7vgaVa1iaRUc9Lp
+	if strings.Contains(spotifyURL, "open.spotify.com/track/") {
+		parts := strings.Split(spotifyURL, "/track/")
+		if len(parts) > 1 {
+			trackID := strings.Split(parts[1], "?")[0]
+			return trackID
+		}
+	} else if strings.HasPrefix(spotifyURL, "spotify:track:") {
+		return strings.TrimPrefix(spotifyURL, "spotify:track:")
+	}
+	// If it's already just an ID
+	if !strings.Contains(spotifyURL, "/") && !strings.Contains(spotifyURL, ":") {
+		return spotifyURL
+	}
+	return ""
+}
+
+// Helper function to format duration from milliseconds to MM:SS
+func formatDuration(ms int) string {
+	totalSeconds := ms / 1000
+	minutes := totalSeconds / 60
+	seconds := totalSeconds % 60
+	return fmt.Sprintf("%d:%02d", minutes, seconds)
+}
+
+// GetConversionSongs returns all songs from a specific playlist conversion
+func (h *CustomLinkHandler) GetConversionSongs(c echo.Context) error {
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	conversionIDStr := c.Param("conversion_id")
+	conversionID, err := uuid.Parse(conversionIDStr)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid conversion ID")
+	}
+
+	ctx := context.Background()
+
+	// Get user
+	var user models.User
+	err = h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Get conversion and verify ownership
+	var conversion models.PlaylistConversion
+	err = h.db.NewSelect().
+		Model(&conversion).
+		Where("id = ? AND user_id = ?", conversionID, user.ID).
+		Scan(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Conversion not found")
+	}
+
+	// Return conversion with all songs from the log
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"conversion_id":        conversion.ID,
+		"playlist_name":        conversion.PlaylistName,
+		"cover_image":          conversion.SpotifyCoverImage,
+		"track_count":          conversion.TrackCount,
+		"spotify_playlist_url": conversion.SpotifyPlaylistURL,
+		"youtube_playlist_url": conversion.YouTubePlaylistURL,
+		"songs":                conversion.ConversionLog,
+	})
 }

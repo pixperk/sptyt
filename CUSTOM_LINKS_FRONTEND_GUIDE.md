@@ -198,23 +198,142 @@ DELETE /api/links/:id
 
 Deletes the link and all its elements permanently.
 
-#### 8. Add Element
+#### 8. Get Song Element Data
+```
+GET /api/links/element-data/song?spotify_url=<url>
+```
+
+Fetches complete element data for a song from Spotify and automatically derives platform links (YouTube, YouTube Lyrics, Genius).
+
+**Query Parameters:**
+- `spotify_url` - Spotify track URL or ID
+
+**Response:**
+```json
+{
+  "element_type": "song",
+  "element_data": {
+    "title": "Song Title",
+    "artists": "Artist Name, Featured Artist",
+    "cover_image": "https://i.scdn.co/image/...",
+    "duration": "3:45",
+    "spotify_url": "https://open.spotify.com/track/...",
+    "youtube_url": "https://youtube.com/watch?v=...",
+    "youtube_lyric_url": "https://youtube.com/watch?v=...",
+    "genius_url": "https://genius.com/..."
+  }
+}
+```
+
+**Usage:**
+```tsx
+const api = new CustomLinksAPI(getToken);
+const songData = await api.getSongElementData('https://open.spotify.com/track/...');
+// Use songData to create an element
+await api.addElement(linkId, {
+  element_type: 'song',
+  element_data: songData.element_data
+});
+```
+
+#### 9. Get Conversion Songs (For Playlist Elements)
+```
+GET /api/links/conversions/:conversion_id/songs
+```
+
+Fetches all songs from a user's converted playlist to use as playlist element.
+
+**Response:**
+```json
+{
+  "conversion_id": "uuid",
+  "playlist_name": "My Summer Playlist",
+  "cover_image": "https://i.scdn.co/image/...",
+  "track_count": 30,
+  "spotify_playlist_url": "https://open.spotify.com/playlist/...",
+  "youtube_playlist_url": "https://youtube.com/playlist?list=...",
+  "songs": [
+    {
+      "spotify_track_name": "Song Title",
+      "spotify_artists": "Artist Name",
+      "youtube_title": "Song Title - Artist (Official Video)",
+      "youtube_url": "https://youtube.com/watch?v=...",
+      "spotify_url": "https://open.spotify.com/track/...",
+      "status": "success"
+    }
+  ]
+}
+```
+
+**Usage:**
+```tsx
+// User selects a conversion from their history
+const conversionSongs = await api.getConversionSongs(conversionId);
+
+// Create playlist element
+await api.addElement(linkId, {
+  element_type: 'playlist',
+  element_data: {
+    title: conversionSongs.playlist_name,
+    cover_image: conversionSongs.cover_image,
+    track_count: conversionSongs.track_count,
+    playlist_spotify_url: conversionSongs.spotify_playlist_url,
+    playlist_youtube_url: conversionSongs.youtube_playlist_url,
+    conversion_id: conversionSongs.conversion_id
+  }
+});
+```
+
+#### 10. Add Element
 ```
 POST /api/links/:id/elements
 ```
 
-**Request Body:**
+**Element Types:**
+- `song` - Individual song with platform links
+- `playlist` - Converted playlist with all songs
+- `custom_text` - Custom HTML/text element
+
+**Request Body (Song Element):**
 ```json
 {
-  "element_type": "spotify_track",  // spotify_track, youtube_video, genius_lyrics, custom_text
+  "element_type": "song",
   "element_data": {
-    "track_name": "Song Title",
+    "title": "Song Title",
     "artists": "Artist Name",
-    "cover_image": "https://...",
+    "cover_image": "https://i.scdn.co/image/...",
     "duration": "3:45",
     "spotify_url": "https://...",
     "youtube_url": "https://...",
+    "youtube_lyric_url": "https://...",
     "genius_url": "https://..."
+  }
+}
+```
+
+**Request Body (Playlist Element):**
+```json
+{
+  "element_type": "playlist",
+  "element_data": {
+    "title": "My Summer Playlist",
+    "cover_image": "https://i.scdn.co/image/...",
+    "track_count": 30,
+    "playlist_spotify_url": "https://open.spotify.com/playlist/...",
+    "playlist_youtube_url": "https://youtube.com/playlist?list=...",
+    "conversion_id": "uuid"
+  }
+}
+```
+
+**Request Body (Custom Text Element):**
+```json
+{
+  "element_type": "custom_text",
+  "element_data": {
+    "custom_text": "Check out my favorite songs!",
+    "custom_html": "<h2>My Playlist</h2><p>Description...</p>",
+    "custom_color": "#FF5733"
   }
 }
 ```
@@ -521,6 +640,27 @@ export class CustomLinksAPI {
     if (res.ok) return true;
     if (res.status === 401) return false;
     throw new Error('Failed to verify password');
+  }
+
+  async getSongElementData(spotifyUrl: string): Promise<{ element_type: string; element_data: any }> {
+    const token = await this.getToken();
+    const res = await fetch(
+      `${API_BASE}/api/links/element-data/song?spotify_url=${encodeURIComponent(spotifyUrl)}`,
+      {
+        headers: { 'Authorization': `Bearer ${token}` },
+      }
+    );
+    if (!res.ok) throw new Error('Failed to fetch song data');
+    return res.json();
+  }
+
+  async getConversionSongs(conversionId: string): Promise<any> {
+    const token = await this.getToken();
+    const res = await fetch(`${API_BASE}/api/links/conversions/${conversionId}/songs`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error('Failed to fetch conversion songs');
+    return res.json();
   }
 }
 ```

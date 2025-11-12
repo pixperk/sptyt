@@ -126,7 +126,7 @@ func main() {
 
 	// Custom link public routes (no auth required)
 	customLinkService := services.NewCustomLinkService(cfg.DB)
-	customLinkHandler := handlers.NewCustomLinkHandler(customLinkService, cfg.DB)
+	customLinkHandler := handlers.NewCustomLinkHandler(customLinkService, cfg.DB, spotifyClient, youtubeClient, geniusClient)
 
 	// Public custom link routes
 	e.GET("/l/:slug", customLinkHandler.ProxyToFrontend)                                      // Proxy to frontend for rendering
@@ -188,6 +188,8 @@ func main() {
 		api.PUT("/links/:id/elements/reorder", customLinkHandler.ReorderElements)            // Reorder elements
 		api.DELETE("/links/:id/elements/:element_id", customLinkHandler.DeleteElement)       // Delete element
 		api.GET("/links/:id/analytics", customLinkHandler.GetLinkAnalytics)                  // Get link analytics
+		api.GET("/links/conversions/:conversion_id/songs", customLinkHandler.GetConversionSongs) // Get songs from a conversion
+		api.GET("/links/element-data/song", customLinkHandler.GetSongElementData)            // Get element data for a song
 
 		log.Println("Clerk authentication enabled - /api/me route available")
 		log.Println("WebSocket server running - /api/ws/playlist-progress available")

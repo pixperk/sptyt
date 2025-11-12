@@ -46,7 +46,7 @@ type LinkElement struct {
 
 	ID           uuid.UUID   `bun:"type:uuid,pk,default:gen_random_uuid()" json:"id"`
 	CustomLinkID uuid.UUID   `bun:"type:uuid,notnull" json:"custom_link_id"`
-	ElementType  string      `bun:",notnull" json:"element_type"`             // spotify_track, youtube_video, genius_lyrics, custom_text
+	ElementType  string      `bun:",notnull" json:"element_type"`             // song, playlist, custom_text
 	ElementData  ElementData `bun:"type:jsonb,notnull" json:"element_data"`
 	DisplayIndex int         `bun:",notnull,default:0" json:"display_index"`  // Order in layout
 	IsVisible    bool        `bun:",notnull,default:true" json:"is_visible"`
@@ -60,16 +60,23 @@ type LinkElement struct {
 
 // ElementData contains the flexible data for different element types
 type ElementData struct {
-	// Track information
-	TrackName  string `json:"track_name,omitempty"`
-	Artists    string `json:"artists,omitempty"`
-	CoverImage string `json:"cover_image,omitempty"`
-	Duration   string `json:"duration,omitempty"` // "3:45"
+	// Common fields for song and playlist
+	Title       string `json:"title,omitempty"`        // Track name or playlist name
+	Artists     string `json:"artists,omitempty"`      // For songs
+	CoverImage  string `json:"cover_image,omitempty"`  // Spotify image URL
+	Duration    string `json:"duration,omitempty"`     // "3:45" for songs
+	TrackCount  int    `json:"track_count,omitempty"`  // For playlists
 
-	// Links
-	SpotifyURL string `json:"spotify_url,omitempty"`
-	YouTubeURL string `json:"youtube_url,omitempty"`
-	GeniusURL  string `json:"genius_url,omitempty"`
+	// Platform links (for song type - user can add any or all)
+	SpotifyURL       string `json:"spotify_url,omitempty"`
+	YouTubeURL       string `json:"youtube_url,omitempty"`
+	YouTubeLyricURL  string `json:"youtube_lyric_url,omitempty"`  // YouTube lyric video
+	GeniusURL        string `json:"genius_url,omitempty"`
+
+	// Playlist-specific fields
+	ConversionID     *uuid.UUID `json:"conversion_id,omitempty"`      // References playlist_conversions table
+	PlaylistSpotifyURL string   `json:"playlist_spotify_url,omitempty"`
+	PlaylistYouTubeURL string   `json:"playlist_youtube_url,omitempty"`
 
 	// Custom text/html element
 	CustomText  string `json:"custom_text,omitempty"`
