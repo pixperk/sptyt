@@ -21,7 +21,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-const youtubeScope = "https://www.googleapis.com/auth/youtube"
+const youtubeScopes = "https://www.googleapis.com/auth/youtube openid profile email"
 
 type YouTubeOAuthHandler struct {
 	db           *bun.DB
@@ -78,7 +78,7 @@ func (h *YouTubeOAuthHandler) Authorize(c echo.Context) error {
 		"client_id":     {h.clientID},
 		"redirect_uri":  {h.redirectURI},
 		"response_type": {"code"},
-		"scope":         {youtubeScope},
+		"scope":         {youtubeScopes},
 		"access_type":   {"offline"}, // Get refresh token
 		"state":         {state},
 		"prompt":        {"consent"}, // Force consent to get refresh token
@@ -150,7 +150,8 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	userInfo, err := h.fetchGoogleUserInfo(ctx, tokenResp.AccessToken)
 	if err != nil {
 		log.Printf("YouTubeOAuth: Warning - failed to fetch user info: %v", err)
-		// Continue anyway, user info is optional
+		// Continue anyway, user info is optional - set to empty struct
+		userInfo = &googleUserInfo{}
 	}
 
 	// Get user from database using the clerk ID from state
@@ -175,7 +176,7 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 		AccessToken:    tokenResp.AccessToken,
 		RefreshToken:   tokenResp.RefreshToken,
 		ExpiresAt:      expiresAt,
-		Scope:          youtubeScope,
+		Scope:          youtubeScopes,
 		AccountEmail:   userInfo.Email,
 		AccountName:    userInfo.Name,
 		AccountPicture: userInfo.Picture,
