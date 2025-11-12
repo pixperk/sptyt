@@ -105,6 +105,7 @@ func main() {
 		AllowOrigins:     []string{"https://sptyt.xyz", "http://localhost:3000"},
 		AllowCredentials: true,
 		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
 	}))
 
 	// Static files
