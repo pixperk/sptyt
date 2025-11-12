@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -104,20 +103,14 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 }
 
 // getMonthlyConversionCount gets the number of conversions this month for a user from analytics
+// NOTE: No caching - this is a fast indexed query on user_id (single row lookup)
+// Caching would add complexity and stale data issues without meaningful performance gain
 func (pl *PlaylistLimiter) getMonthlyConversionCount(ctx context.Context, userID interface{}) (int, error) {
 	now := time.Now()
 	currentMonth := int(now.Month())
 	currentYear := now.Year()
 
-	// Try to get from cache first
-	cacheKey := fmt.Sprintf("monthly_conversions:%v:%d-%d", userID, currentYear, currentMonth)
-	if cached, err := pl.cache.Get(ctx, cacheKey); err == nil {
-		var count int
-		fmt.Sscanf(cached, "%d", &count)
-		return count, nil
-	}
-
-	// Get from analytics table
+	// Get directly from analytics table (fast query with user_id unique index)
 	var analytics models.UserAnalytics
 	err := pl.db.NewSelect().
 		Model(&analytics).
@@ -138,21 +131,7 @@ func (pl *PlaylistLimiter) getMonthlyConversionCount(ctx context.Context, userID
 		count = 0
 	}
 
-	// Cache for 5 minutes (short cache since this changes frequently)
-	pl.cache.Set(ctx, cacheKey, fmt.Sprintf("%d", count), 5*time.Minute)
-
 	return count, nil
-}
-
-// IncrementMonthlyConversionCount invalidates the cache for monthly conversion count
-func (pl *PlaylistLimiter) IncrementMonthlyConversionCount(ctx context.Context, userID interface{}) error {
-	now := time.Now()
-	currentMonth := int(now.Month())
-	currentYear := now.Year()
-	cacheKey := fmt.Sprintf("monthly_conversions:%v:%d-%d", userID, currentYear, currentMonth)
-
-	// Invalidate cache
-	return pl.cache.Delete(ctx, cacheKey)
 }
 
 // ValidatePlaylistSize validates that the playlist doesn't exceed user's limits
