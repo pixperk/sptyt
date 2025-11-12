@@ -185,82 +185,15 @@ DODOPAY_RETURN_URL=https://yourdomain.com/payment/return
 FRONTEND_URL=https://yourdomain.com
 ```
 
-## Installation & Setup
-
-### Prerequisites
-- Go 1.21 or higher
-- PostgreSQL 14+
-- Redis 6+
-
-### Local Development
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/sptyt.git
-cd sptyt
-```
-
-2. Install dependencies:
-```bash
-go mod download
-```
-
-3. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your API keys and configuration
-```
-
-4. Run database migrations:
-```bash
-go run main.go
-# Migrations run automatically on startup
-```
-
-5. Start the server:
-```bash
-go run main.go
-```
-
-The server will start on `http://localhost:8080`
-
-## Database Schema
-
-### Users Table
-- User authentication and profile information
-- Subscription tier and status tracking
-- Timestamps for account lifecycle
-
-### OAuth Tokens Table
-- YouTube OAuth access and refresh tokens
-- Google account information (email, name, picture)
-- Token expiry tracking
-
-### Playlist Conversions Table
-- Conversion job metadata and status
-- Spotify and YouTube playlist IDs and URLs
-- Cover image URLs
-- Track count and success/failure counts
-- JSONB field for detailed track conversion logs
-
-### User Analytics Table
-- Total and successful conversion counts
-- Monthly usage tracking with automatic resets
-- Track-level statistics (processed, matched, failed)
-- Current month/year for automatic reset logic
-
 ## Key Technical Decisions
 
 ### Why Asynq Instead of Cron Jobs?
-- Reliable job queue with retries
-- Horizontal scalability
-- Job deduplication
-- Real-time job status tracking
+- Reliable job queue with retries and horizontal scalability
+- Job deduplication and real-time status tracking
 - Redis-backed persistence
 
 ### Why No Redis Caching for Monthly Limits?
 - Database query with unique index is already fast (< 1ms)
-- Caching adds complexity and stale data issues
 - Eliminated race conditions from cache invalidation
 - Simpler codebase with direct database queries
 
@@ -269,105 +202,13 @@ The server will start on `http://localhost:8080`
 - Counter increments before async job processing
 - Race-safe without distributed locks
 
-### Why WebSockets for Progress Updates?
-- Real-time user experience
-- Lower latency than polling
-- Reduced server load compared to frequent HTTP requests
-- Native support in modern browsers
-
 ## Coming Soon
 
 ### Custom Link Generation
-- User-generated shareable links for playlists
-- Configurable content options:
-  - Include/exclude official music videos
-  - Include/exclude lyric videos
-  - Include/exclude Genius lyrics links
-  - Include/exclude Spotify links
-- Beautiful public landing pages for shared playlists
-- View count tracking and analytics
-- Optional password protection for private shares
-- Configurable link expiration (free tier: 7 days, premium: permanent)
+Create shareable links for converted playlists with configurable content options. Users can choose what to include in their shared links:
+- Official music videos
+- Lyric videos
+- Genius lyrics links
+- Spotify track links
 
-### Enhanced Track Matching
-- Album art-based matching using image recognition
-- Audio fingerprinting for exact track matching
-- User-defined fallback preferences
-- Manual track remapping interface
-- Spotify ISRC database expansion
-
-### Playlist Management
-- Edit converted playlists
-- Add/remove individual tracks
-- Bulk playlist operations
-- Playlist merging and splitting
-- Duplicate detection and removal
-
-### Social Features
-- Public profile pages
-- Share conversion statistics
-- Follow other users
-- Collaborative playlists
-- Playlist comments and ratings
-
-### Advanced Analytics
-- Conversion quality scoring
-- Most popular matched tracks
-- Failed track patterns analysis
-- Match method effectiveness tracking
-- API usage statistics dashboard
-
-### Integration Expansions
-- Apple Music support
-- SoundCloud integration
-- Deezer compatibility
-- Tidal integration
-- Bandcamp support
-
-### Mobile Applications
-- Native iOS app
-- Native Android app
-- Progressive Web App (PWA)
-- Offline playlist queueing
-- Push notifications for completed conversions
-
-### API Platform
-- Public API for developers
-- Rate-limited API keys
-- Webhook support for third-party integrations
-- SDKs for popular languages (Python, JavaScript, Ruby)
-- API documentation portal
-
-### Enterprise Features
-- Team accounts with shared conversion quotas
-- Bulk conversion API
-- White-label options
-- Custom domain support
-- Advanced permission management
-- SSO integration (SAML, OIDC)
-
-## Contributing
-
-Contributions are welcome. Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for details.
-
-## Support
-
-For support, email support@sptyt.xyz or open an issue on GitHub.
-
-## Acknowledgments
-
-- Spotify Web API for music metadata
-- YouTube Data API for playlist management
-- Genius API for lyrics integration
-- DodoPay for payment processing
-- Clerk for authentication services
+Each custom link generates a beautiful public landing page displaying the playlist with all selected content types. Free tier links expire after 7 days, while premium links are permanent. Optional password protection available for private shares.
