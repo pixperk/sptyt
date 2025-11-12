@@ -227,7 +227,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	result, err := s.db.NewUpdate().
 		Model(conversion).
-		Column("playlist_name", "track_count", "success_count", "failure_count", "you_tube_playlist_id", "you_tube_playlist_url", "conversion_log", "status", "updated_at", "completed_at").
+		Column("playlist_name", "track_count", "success_count", "failure_count", "you_tube_playlist_id", "you_tube_playlist_url", "spotify_cover_image", "conversion_log", "status", "updated_at", "completed_at").
 		Where("id = ?", conversion.ID).
 		Exec(ctx)
 
