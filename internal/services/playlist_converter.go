@@ -18,7 +18,7 @@ import (
 
 // AnalyticsTaskClient interface for enqueuing analytics tasks (avoids import cycle)
 type AnalyticsTaskClient interface {
-	EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error
+	EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool) error
 }
 
 type PlaylistConverterService struct {
@@ -60,6 +60,21 @@ type TrackMatchResult struct {
 	VideoID     string
 	Error       error
 	MatchMethod string
+}
+
+// isYouTubeAPIError checks if an error is a YouTube API error that shouldn't count against quota
+func isYouTubeAPIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "401") ||
+		strings.Contains(errStr, "403") ||
+		strings.Contains(errStr, "409") ||
+		strings.Contains(errStr, "quota") ||
+		strings.Contains(errStr, "quotaexceeded") ||
+		strings.Contains(errStr, "unauthorized") ||
+		strings.Contains(errStr, "forbidden")
 }
 
 // ConvertPlaylist converts a Spotify playlist to YouTube playlist
@@ -144,8 +159,17 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	youtubePlaylistID, err := s.youtubeClient.CreatePlaylist(ctx, job.YouTubeAccessToken, youtubePlaylistName, fmt.Sprintf("Converted from Spotify playlist: %s", playlist.Name))
 	if err != nil {
-		s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err))
+		// Check if this is a YouTube API error (quota, 401, 403, 409)
+		countsAgainstQuota := !isYouTubeAPIError(err)
+
+		// Update conversion status with CountsAgainstQuota flag
+		s.updateConversionStatusWithQuotaFlag(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err), countsAgainstQuota)
 		s.publishProgress(job.ClerkUserID, conversion.ID.String(), "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err), nil)
+
+		if !countsAgainstQuota {
+			log.Printf("ConversionService: YouTube API error detected - conversion %s will NOT count against quota", conversion.ID)
+		}
+
 		return nil, fmt.Errorf("failed to create YouTube playlist: %w", err)
 	}
 
@@ -241,7 +265,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	// Enqueue analytics update task (async)
 	isSuccess := conversion.Status == "completed"
-	if err := s.taskClient.EnqueueAnalyticsUpdate(job.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount); err != nil {
+	if err := s.taskClient.EnqueueAnalyticsUpdate(job.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount, conversion.CountsAgainstQuota); err != nil {
 		log.Printf("ConversionService: WARNING - Failed to enqueue analytics update task: %v", err)
 		// Don't fail the conversion if analytics enqueue fails
 	}
@@ -429,6 +453,30 @@ func (s *PlaylistConverterService) updateConversionStatus(ctx context.Context, i
 	}
 }
 
+// updateConversionStatusWithQuotaFlag updates conversion status with counts_against_quota flag
+func (s *PlaylistConverterService) updateConversionStatusWithQuotaFlag(ctx context.Context, id uuid.UUID, status string, errorMsg string, countsAgainstQuota bool) {
+	update := s.db.NewUpdate().
+		Model((*models.PlaylistConversion)(nil)).
+		Set("status = ?", status).
+		Set("updated_at = ?", time.Now()).
+		Set("counts_against_quota = ?", countsAgainstQuota).
+		Where("id = ?", id)
+
+	if errorMsg != "" {
+		update = update.Set("error_message = ?", errorMsg)
+	}
+
+	if status == "completed" || status == "failed" {
+		completedAt := time.Now()
+		update = update.Set("completed_at = ?", completedAt)
+	}
+
+	_, err := update.Exec(ctx)
+	if err != nil {
+		log.Printf("Failed to update conversion status: %v", err)
+	}
+}
+
 // GetConversion fetches a conversion by ID
 func (s *PlaylistConverterService) GetConversion(ctx context.Context, id uuid.UUID) (*models.PlaylistConversion, error) {
 	var conversion models.PlaylistConversion
@@ -490,16 +538,16 @@ func (s *PlaylistConverterService) publishProgress(userID string, conversionID s
 }
 
 // UpdateUserAnalytics updates or creates user analytics record (accepts string UUID)
-func (s *PlaylistConverterService) UpdateUserAnalytics(ctx context.Context, userIDStr string, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error {
+func (s *PlaylistConverterService) UpdateUserAnalytics(ctx context.Context, userIDStr string, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool) error {
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return fmt.Errorf("invalid user ID: %w", err)
 	}
-	return s.updateUserAnalytics(ctx, userID, spotifyType, isSuccess, trackCount, successCount, failureCount)
+	return s.updateUserAnalytics(ctx, userID, spotifyType, isSuccess, trackCount, successCount, failureCount, countsAgainstQuota)
 }
 
 // updateUserAnalytics updates or creates user analytics record (internal method)
-func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int) error {
+func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool) error {
 	now := time.Now()
 
 	// Try to get existing analytics record
@@ -511,13 +559,18 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 
 	if err != nil {
 		// Record doesn't exist, create it
+		monthlyConversions := 0
+		if countsAgainstQuota {
+			monthlyConversions = 1
+		}
+
 		analytics = models.UserAnalytics{
 			UserID:               userID,
 			TotalConversions:     1,
 			TotalTracksProcessed: trackCount,
 			TotalTracksMatched:   successCount,
 			TotalTracksFailed:    failureCount,
-			MonthlyConversions:   1,
+			MonthlyConversions:   monthlyConversions,
 			CurrentMonth:         int(now.Month()),
 			CurrentYear:          now.Year(),
 			FirstConversionAt:    &now,
@@ -552,17 +605,20 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 		Set("last_conversion_at = ?", now).
 		Set("updated_at = ?", now)
 
-	// Check if we need to reset monthly counter (new month)
-	currentMonth := int(now.Month())
-	currentYear := now.Year()
-	if analytics.CurrentMonth != currentMonth || analytics.CurrentYear != currentYear {
-		// New month, reset counter
-		update = update.Set("monthly_conversions = 1").
-			Set("current_month = ?", currentMonth).
-			Set("current_year = ?", currentYear)
-	} else {
-		// Same month, increment
-		update = update.Set("monthly_conversions = monthly_conversions + 1")
+	// Only update monthly counter if this conversion counts against quota
+	if countsAgainstQuota {
+		// Check if we need to reset monthly counter (new month)
+		currentMonth := int(now.Month())
+		currentYear := now.Year()
+		if analytics.CurrentMonth != currentMonth || analytics.CurrentYear != currentYear {
+			// New month, reset counter to 1
+			update = update.Set("monthly_conversions = 1").
+				Set("current_month = ?", currentMonth).
+				Set("current_year = ?", currentYear)
+		} else {
+			// Same month, increment
+			update = update.Set("monthly_conversions = monthly_conversions + 1")
+		}
 	}
 
 	if isSuccess {

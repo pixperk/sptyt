@@ -157,13 +157,6 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start conversion")
 	}
 
-	// Immediately increment monthly conversion counter for limit checking
-	// This prevents users from bypassing limits by making concurrent requests
-	if err := h.incrementMonthlyCounter(ctx, user.ID); err != nil {
-		log.Printf("ConvertPlaylist: Warning - failed to increment monthly counter: %v", err)
-		// Don't fail the request if this fails, just log it
-	}
-
 	log.Printf("ConvertPlaylist: Enqueued conversion task %s for user %s", conversion.ID, user.ID)
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{

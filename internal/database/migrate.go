@@ -147,5 +147,16 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Added account info columns to oauth_tokens table")
 	}
 
+	// Add counts_against_quota column to playlist_conversions table
+	_, err = db.Exec(`
+		ALTER TABLE playlist_conversions
+		ADD COLUMN IF NOT EXISTS counts_against_quota BOOLEAN DEFAULT true;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add counts_against_quota column: %v", err)
+	} else {
+		log.Println("Added counts_against_quota column to playlist_conversions table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }

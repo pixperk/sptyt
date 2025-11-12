@@ -40,12 +40,13 @@ func NewPlaylistConversionTask(payload PlaylistConversionPayload) (*asynq.Task, 
 
 // AnalyticsUpdatePayload represents the task payload for analytics updates
 type AnalyticsUpdatePayload struct {
-	UserID       string `json:"user_id"`       // Database UUID
-	SpotifyType  string `json:"spotify_type"`  // "playlist" or "album"
-	IsSuccess    bool   `json:"is_success"`    // Whether conversion succeeded
-	TrackCount   int    `json:"track_count"`   // Total tracks
-	SuccessCount int    `json:"success_count"` // Successfully matched tracks
-	FailureCount int    `json:"failure_count"` // Failed tracks
+	UserID             string `json:"user_id"`               // Database UUID
+	SpotifyType        string `json:"spotify_type"`          // "playlist" or "album"
+	IsSuccess          bool   `json:"is_success"`            // Whether conversion succeeded
+	TrackCount         int    `json:"track_count"`           // Total tracks
+	SuccessCount       int    `json:"success_count"`         // Successfully matched tracks
+	FailureCount       int    `json:"failure_count"`         // Failed tracks
+	CountsAgainstQuota bool   `json:"counts_against_quota"`  // Whether conversion counts against quota
 }
 
 // NewAnalyticsUpdateTask creates a new Asynq task for analytics updates
@@ -108,10 +109,10 @@ func (p *PlaylistConversionProcessor) ProcessAnalyticsUpdate(ctx context.Context
 		return fmt.Errorf("failed to unmarshal analytics payload: %w", err)
 	}
 
-	log.Printf("Processing analytics update task for user: %s", payload.UserID)
+	log.Printf("Processing analytics update task for user: %s (counts_against_quota: %v)", payload.UserID, payload.CountsAgainstQuota)
 
 	// Call the analytics update service method
-	err := p.converterService.UpdateUserAnalytics(ctx, payload.UserID, payload.SpotifyType, payload.IsSuccess, payload.TrackCount, payload.SuccessCount, payload.FailureCount)
+	err := p.converterService.UpdateUserAnalytics(ctx, payload.UserID, payload.SpotifyType, payload.IsSuccess, payload.TrackCount, payload.SuccessCount, payload.FailureCount, payload.CountsAgainstQuota)
 	if err != nil {
 		log.Printf("Analytics update failed: %v", err)
 		return fmt.Errorf("analytics update failed: %w", err)
