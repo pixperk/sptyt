@@ -122,6 +122,12 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	conversion.PlaylistName = playlist.Name
 	conversion.TrackCount = len(tracks)
+
+	// Save cover image (use the first/largest image if available)
+	if len(playlist.Images) > 0 {
+		conversion.SpotifyCoverImage = playlist.Images[0].URL
+	}
+
 	log.Printf("ConversionService: Fetched %d tracks from Spotify %s", len(tracks), job.SpotifyType)
 
 	// Send progress: tracks fetched
