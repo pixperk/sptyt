@@ -124,6 +124,16 @@ func main() {
 	webhookHandler := handlers.NewWebhookHandler(cfg.DB)
 	e.POST("/webhooks/dodopay", webhookHandler.DodoPayWebhook)
 
+	// Custom link public routes (no auth required)
+	customLinkService := services.NewCustomLinkService(cfg.DB)
+	customLinkHandler := handlers.NewCustomLinkHandler(customLinkService, cfg.DB)
+
+	// Public custom link routes
+	e.GET("/l/:slug", customLinkHandler.ProxyToFrontend)                                      // Proxy to frontend for rendering
+	e.GET("/api/links/:slug", customLinkHandler.GetLinkBySlugPublic)                          // API to get link data
+	e.POST("/api/links/:slug/verify", customLinkHandler.VerifyLinkPassword)                   // Verify password for protected link
+	e.GET("/api/track/:link_id/:element_id", customLinkHandler.TrackElementClick)             // Track element click and redirect
+
 	// Protected API routes (require Clerk authentication)
 	if cfg.ClerkSecretKey != "" {
 		clerkMiddleware := auth.NewClerkMiddleware(cfg.ClerkSecretKey)
@@ -167,6 +177,17 @@ func main() {
 		api.GET("/analytics", analyticsHandler.GetUserAnalytics)
 		api.GET("/analytics/monthly", analyticsHandler.GetMonthlyStats)
 		api.GET("/dashboard", analyticsHandler.GetUserDashboard)
+
+		// Custom link management endpoints (protected - require authentication)
+		api.POST("/links", customLinkHandler.CreateCustomLink)                               // Create custom link
+		api.GET("/links", customLinkHandler.GetUserLinks)                                    // Get user's custom links
+		api.GET("/links/:id", customLinkHandler.GetCustomLink)                               // Get specific link by ID
+		api.PUT("/links/:id", customLinkHandler.UpdateCustomLink)                            // Update custom link
+		api.DELETE("/links/:id", customLinkHandler.DeleteCustomLink)                         // Delete custom link
+		api.POST("/links/:id/elements", customLinkHandler.AddElement)                        // Add element to link
+		api.PUT("/links/:id/elements/reorder", customLinkHandler.ReorderElements)            // Reorder elements
+		api.DELETE("/links/:id/elements/:element_id", customLinkHandler.DeleteElement)       // Delete element
+		api.GET("/links/:id/analytics", customLinkHandler.GetLinkAnalytics)                  // Get link analytics
 
 		log.Println("Clerk authentication enabled - /api/me route available")
 		log.Println("WebSocket server running - /api/ws/playlist-progress available")

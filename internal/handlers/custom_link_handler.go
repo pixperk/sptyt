@@ -387,3 +387,148 @@ func (h *CustomLinkHandler) ProxyToFrontend(c echo.Context) error {
 	proxy.ServeHTTP(c.Response(), req)
 	return nil
 }
+
+// GetLinkBySlugPublic returns a custom link by slug (public access, for API calls)
+func (h *CustomLinkHandler) GetLinkBySlugPublic(c echo.Context) error {
+	slug := c.Param("slug")
+	ctx := context.Background()
+
+	link, err := h.service.GetLinkBySlug(ctx, slug)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Link not found")
+	}
+
+	// Check if link is expired
+	if link.IsExpired() {
+		return echo.NewHTTPError(http.StatusGone, "Link has expired")
+	}
+
+	// Check if link is public
+	if !link.IsPublic {
+		return echo.NewHTTPError(http.StatusNotFound, "Link not found")
+	}
+
+	// Track page view (async in production, but sync for now)
+	ipAddress := c.RealIP()
+	userAgent := c.Request().UserAgent()
+	referrer := c.Request().Referer()
+
+	go func() {
+		bgCtx := context.Background()
+		h.service.IncrementViewCount(bgCtx, link.ID)
+		h.service.TrackPageView(bgCtx, link.ID, ipAddress, userAgent, referrer)
+	}()
+
+	return c.JSON(http.StatusOK, link)
+}
+
+// TrackElementClick tracks an element click and returns the target URL
+func (h *CustomLinkHandler) TrackElementClick(c echo.Context) error {
+	linkID, err := uuid.Parse(c.Param("link_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
+	}
+
+	elementID, err := uuid.Parse(c.Param("element_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid element ID")
+	}
+
+	ctx := context.Background()
+
+	// Get the element to retrieve the target URL
+	var element models.LinkElement
+	err = h.db.NewSelect().
+		Model(&element).
+		Where("id = ? AND custom_link_id = ?", elementID, linkID).
+		Scan(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Element not found")
+	}
+
+	// Track the click (async)
+	ipAddress := c.RealIP()
+	userAgent := c.Request().UserAgent()
+	referrer := c.Request().Referer()
+
+	go func() {
+		bgCtx := context.Background()
+		h.service.TrackElementClick(bgCtx, linkID, elementID, ipAddress, userAgent, referrer)
+	}()
+
+	// Determine target URL based on element type
+	var targetURL string
+	switch element.ElementType {
+	case "spotify_track":
+		targetURL = element.ElementData.SpotifyURL
+	case "youtube_video":
+		targetURL = element.ElementData.YouTubeURL
+	case "genius_lyrics":
+		targetURL = element.ElementData.GeniusURL
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "Element has no clickable URL")
+	}
+
+	if targetURL == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Element has no target URL")
+	}
+
+	// Redirect to the target URL
+	return c.Redirect(http.StatusFound, targetURL)
+}
+
+// GetLinkAnalytics returns analytics data for a custom link (owner only)
+func (h *CustomLinkHandler) GetLinkAnalytics(c echo.Context) error {
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	linkID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
+	}
+
+	ctx := context.Background()
+
+	var user models.User
+	err = h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	analytics, err := h.service.GetLinkAnalytics(ctx, linkID, user.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, analytics)
+}
+
+// VerifyLinkPassword verifies a password for a password-protected link
+func (h *CustomLinkHandler) VerifyLinkPassword(c echo.Context) error {
+	slug := c.Param("slug")
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+	}
+
+	ctx := context.Background()
+
+	isValid, err := h.service.VerifyPassword(ctx, slug, req.Password)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Link not found")
+	}
+
+	if !isValid {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Incorrect password")
+	}
+
+	return c.JSON(http.StatusOK, map[string]bool{"valid": true})
+}

@@ -339,6 +339,118 @@ func (s *CustomLinkService) IncrementViewCount(ctx context.Context, linkID uuid.
 	return err
 }
 
+// TrackPageView records a page view event in analytics
+func (s *CustomLinkService) TrackPageView(ctx context.Context, linkID uuid.UUID, ipAddress, userAgent, referrer string) error {
+	analytics := &models.LinkAnalytics{
+		CustomLinkID:  linkID,
+		LinkElementID: nil,
+		EventType:     "page_view",
+		IPAddress:     ipAddress,
+		UserAgent:     userAgent,
+		Referrer:      referrer,
+		CreatedAt:     time.Now(),
+	}
+
+	_, err := s.db.NewInsert().Model(analytics).Exec(ctx)
+	return err
+}
+
+// TrackElementClick records an element click and increments click count
+func (s *CustomLinkService) TrackElementClick(ctx context.Context, linkID, elementID uuid.UUID, ipAddress, userAgent, referrer string) error {
+	// Increment element click count
+	_, err := s.db.NewUpdate().
+		Model((*models.LinkElement)(nil)).
+		Set("click_count = click_count + 1").
+		Where("id = ? AND custom_link_id = ?", elementID, linkID).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Record analytics event
+	analytics := &models.LinkAnalytics{
+		CustomLinkID:  linkID,
+		LinkElementID: &elementID,
+		EventType:     "element_click",
+		IPAddress:     ipAddress,
+		UserAgent:     userAgent,
+		Referrer:      referrer,
+		CreatedAt:     time.Now(),
+	}
+
+	_, err = s.db.NewInsert().Model(analytics).Exec(ctx)
+	return err
+}
+
+// GetLinkAnalytics returns analytics summary for a custom link
+func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID uuid.UUID) (map[string]interface{}, error) {
+	// Verify ownership
+	var link models.CustomLink
+	err := s.db.NewSelect().
+		Model(&link).
+		Where("id = ? AND user_id = ?", linkID, userID).
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("custom link not found")
+	}
+
+	// Get total page views
+	pageViews, err := s.db.NewSelect().
+		Model((*models.LinkAnalytics)(nil)).
+		Where("custom_link_id = ? AND event_type = ?", linkID, "page_view").
+		Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get total element clicks
+	elementClicks, err := s.db.NewSelect().
+		Model((*models.LinkAnalytics)(nil)).
+		Where("custom_link_id = ? AND event_type = ?", linkID, "element_click").
+		Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get element-wise click counts
+	type ElementStats struct {
+		ElementID  uuid.UUID `bun:"link_element_id"`
+		ClickCount int       `bun:"click_count"`
+	}
+
+	var elementStats []ElementStats
+	err = s.db.NewSelect().
+		Model((*models.LinkAnalytics)(nil)).
+		Column("link_element_id").
+		ColumnExpr("COUNT(*) as click_count").
+		Where("custom_link_id = ? AND event_type = ? AND link_element_id IS NOT NULL", linkID, "element_click").
+		Group("link_element_id").
+		Order("click_count DESC").
+		Scan(ctx, &elementStats)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get recent views (last 30 days)
+	thirtyDaysAgo := time.Now().Add(-30 * 24 * time.Hour)
+	recentViews, err := s.db.NewSelect().
+		Model((*models.LinkAnalytics)(nil)).
+		Where("custom_link_id = ? AND event_type = ? AND created_at > ?", linkID, "page_view", thirtyDaysAgo).
+		Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"link_id":         linkID,
+		"total_views":     pageViews,
+		"total_clicks":    elementClicks,
+		"recent_views":    recentViews,
+		"element_stats":   elementStats,
+		"view_count":      link.ViewCount,
+	}, nil
+}
+
 // Helper methods
 
 func (s *CustomLinkService) slugExists(ctx context.Context, slug string) (bool, error) {
