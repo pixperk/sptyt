@@ -55,7 +55,7 @@ func main() {
 		asynqRedisAddr = "localhost:6379"
 	}
 
-	rateLimit := 60
+	rateLimit := 200 // Increased from 60 to 200 requests per minute
 	if rateLimitStr != "" {
 		if limit, err := strconv.Atoi(rateLimitStr); err == nil && limit > 0 {
 			rateLimit = limit
@@ -99,13 +99,14 @@ func main() {
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(rateLimiter.Middleware())
-	e.Use(custommw.MobileAppRedirect())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:     []string{"https://sptyt.xyz", "http://localhost:3000"},
 		AllowCredentials: true,
 		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
 	}))
+	e.Use(rateLimiter.Middleware())
+	e.Use(custommw.MobileAppRedirect())
 
 	// Static files
 	e.Static("/static", "web/static")

@@ -30,6 +30,17 @@ func NewRateLimiter(client *redis.Client, requestsPerMinute int) *RateLimiter {
 func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			// Skip rate limiting for OPTIONS requests (CORS preflight)
+			if c.Request().Method == "OPTIONS" {
+				return next(c)
+			}
+
+			// Skip rate limiting for health check endpoints
+			path := c.Path()
+			if path == "/health" || path == "/ping" {
+				return next(c)
+			}
+
 			ip := c.RealIP()
 			key := rl.keyPrefix + ip
 
