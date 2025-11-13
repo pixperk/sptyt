@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -369,33 +367,6 @@ func (h *CustomLinkHandler) DeleteElement(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Element deleted successfully"})
-}
-
-// ProxyToFrontend proxies the request to the frontend for rendering the custom link page
-func (h *CustomLinkHandler) ProxyToFrontend(c echo.Context) error {
-	slug := c.Param("slug")
-
-	// Parse frontend URL
-	frontendURL, err := url.Parse(h.frontendURL)
-	if err != nil {
-		log.Printf("Invalid frontend URL: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "Configuration error")
-	}
-
-	// Create reverse proxy
-	proxy := httputil.NewSingleHostReverseProxy(frontendURL)
-
-	// Modify the request
-	req := c.Request()
-	req.URL.Host = frontendURL.Host
-	req.URL.Scheme = frontendURL.Scheme
-	req.URL.Path = fmt.Sprintf("/l/%s", slug)
-	req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
-	req.Host = frontendURL.Host
-
-	// Serve the proxy
-	proxy.ServeHTTP(c.Response(), req)
-	return nil
 }
 
 // GetLinkBySlugPublic returns a custom link by slug (public access, for API calls)

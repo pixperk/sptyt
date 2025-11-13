@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// CustomLink represents a shareable custom link with playlist/track elements
+// CustomLink represents a shareable custom link with Bento-style grid elements
 type CustomLink struct {
 	bun.BaseModel `bun:"table:custom_links,alias:cl"`
 
@@ -16,7 +16,7 @@ type CustomLink struct {
 	Slug                string     `bun:",unique,notnull" json:"slug"`                          // URL-safe identifier
 	Title               string     `bun:",notnull" json:"title"`
 	Description         string     `bun:"" json:"description,omitempty"`
-	LayoutType          string     `bun:",notnull,default:'little_broad'" json:"layout_type"`   // horizontal, full_broad, little_broad, grid, compact
+	BackgroundColor     string     `bun:",default:'#ffffff'" json:"background_color"`           // Page background color
 	Theme               string     `bun:",notnull,default:'auto'" json:"theme"`                 // light, dark, auto
 	IsPasswordProtected bool       `bun:",notnull,default:false" json:"is_password_protected"`
 	PasswordHash        string     `bun:"" json:"-"`                                            // Never expose in JSON
@@ -58,8 +58,18 @@ type LinkElement struct {
 	CustomLink *CustomLink `bun:"rel:belongs-to,join:custom_link_id=id" json:"-"`
 }
 
-// ElementData contains the flexible data for different element types
+// ElementData contains the flexible data for different element types (Bento-style)
 type ElementData struct {
+	// Bento Grid Styling (applies to all element types)
+	GridColumn     string `json:"grid_column,omitempty"`      // CSS grid column (e.g., "span 2")
+	GridRow        string `json:"grid_row,omitempty"`         // CSS grid row (e.g., "span 2")
+	BackgroundColor string `json:"background_color,omitempty"` // Element background (#hex or gradient)
+	BorderRadius   string `json:"border_radius,omitempty"`    // Border radius (e.g., "12px")
+	BorderColor    string `json:"border_color,omitempty"`     // Border color
+	TextColor      string `json:"text_color,omitempty"`       // Text color
+	FontSize       string `json:"font_size,omitempty"`        // Font size (e.g., "16px", "1rem")
+	Padding        string `json:"padding,omitempty"`          // Padding (e.g., "20px")
+
 	// Common fields for song and playlist
 	Title       string `json:"title,omitempty"`        // Track name or playlist name
 	Artists     string `json:"artists,omitempty"`      // For songs
@@ -74,14 +84,21 @@ type ElementData struct {
 	GeniusURL        string `json:"genius_url,omitempty"`
 
 	// Playlist-specific fields
-	ConversionID     *uuid.UUID `json:"conversion_id,omitempty"`      // References playlist_conversions table
-	PlaylistSpotifyURL string   `json:"playlist_spotify_url,omitempty"`
-	PlaylistYouTubeURL string   `json:"playlist_youtube_url,omitempty"`
+	ConversionID       *uuid.UUID `json:"conversion_id,omitempty"`        // References playlist_conversions table
+	PlaylistSpotifyURL string     `json:"playlist_spotify_url,omitempty"`
+	PlaylistYouTubeURL string     `json:"playlist_youtube_url,omitempty"`
 
 	// Custom text/html element
 	CustomText  string `json:"custom_text,omitempty"`
 	CustomHTML  string `json:"custom_html,omitempty"`
-	CustomColor string `json:"custom_color,omitempty"` // Hex color for custom elements
+
+	// Link element (simple link with icon)
+	LinkURL  string `json:"link_url,omitempty"`   // For simple link elements
+	LinkIcon string `json:"link_icon,omitempty"`  // Icon name or URL
+
+	// Image element
+	ImageURL string `json:"image_url,omitempty"` // For standalone image elements
+	ImageAlt string `json:"image_alt,omitempty"`
 }
 
 // LinkAnalytics tracks events on custom links

@@ -129,7 +129,6 @@ func main() {
 	customLinkHandler := handlers.NewCustomLinkHandler(customLinkService, cfg.DB, spotifyClient, youtubeClient, geniusClient)
 
 	// Public custom link routes
-	e.GET("/l/:slug", customLinkHandler.ProxyToFrontend)                                      // Proxy to frontend for rendering
 	e.GET("/api/links/:slug", customLinkHandler.GetLinkBySlugPublic)                          // API to get link data
 	e.POST("/api/links/:slug/verify", customLinkHandler.VerifyLinkPassword)                   // Verify password for protected link
 	e.GET("/api/track/:link_id/:element_id", customLinkHandler.TrackElementClick)             // Track element click and redirect

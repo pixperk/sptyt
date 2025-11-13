@@ -214,5 +214,24 @@ func RunMigrations(db *bun.DB) {
 		log.Fatalf("Failed to create link_analytics indexes: %v", err)
 	}
 
+	// Add background_color column to custom_links (Bento-style support)
+	_, err = db.Exec(`
+		ALTER TABLE custom_links
+		ADD COLUMN IF NOT EXISTS background_color TEXT DEFAULT '#ffffff';
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add background_color column: %v", err)
+	} else {
+		log.Println("Added background_color column to custom_links table")
+	}
+
+	// Drop layout_type column from custom_links (moved to per-element styling)
+	_, err = db.Exec("ALTER TABLE custom_links DROP COLUMN IF EXISTS layout_type")
+	if err != nil {
+		log.Printf("Warning: Failed to drop layout_type column: %v", err)
+	} else {
+		log.Println("Dropped layout_type column from custom_links table (moved to Bento-style)")
+	}
+
 	log.Println("Database migrations completed successfully")
 }
