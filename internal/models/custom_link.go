@@ -59,6 +59,9 @@ type LinkElement struct {
 
 // ElementData contains the flexible data for different element types
 type ElementData struct {
+	// Layout configuration
+	LayoutType string `json:"layout_type,omitempty"` // compact, detailed, minimal, etc.
+
 	// Minimal styling (optional, frontend handles most styling)
 	BackgroundColor string `json:"background_color,omitempty"` // Element background color
 	BorderRadius    string `json:"border_radius,omitempty"`    // Border radius (e.g., "12px")
