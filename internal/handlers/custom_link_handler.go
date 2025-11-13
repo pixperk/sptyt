@@ -692,3 +692,69 @@ func (h *CustomLinkHandler) GetConversionSongs(c echo.Context) error {
 		"songs":                conversion.ConversionLog,
 	})
 }
+
+// GetConversionSongsPublic returns songs from a conversion (public endpoint)
+// Used when viewing a public custom link that contains a playlist element
+func (h *CustomLinkHandler) GetConversionSongsPublic(c echo.Context) error {
+	conversionIDStr := c.Param("conversion_id")
+	conversionID, err := uuid.Parse(conversionIDStr)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid conversion ID")
+	}
+
+	ctx := context.Background()
+
+	// Get conversion
+	var conversion models.PlaylistConversion
+	err = h.db.NewSelect().
+		Model(&conversion).
+		Where("id = ?", conversionID).
+		Scan(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Conversion not found")
+	}
+
+	// Check if this conversion is linked to any public custom links
+	var customLink models.CustomLink
+	err = h.db.NewSelect().
+		Model(&customLink).
+		Where("conversion_id = ?", conversionID).
+		WhereOr("id IN (SELECT custom_link_id FROM link_elements WHERE element_data->>'conversion_id' = ?)", conversionID.String()).
+		Scan(ctx)
+
+	// If we can't find a custom link, check if there's a playlist element referencing this conversion
+	if err != nil {
+		// Check in link_elements for any element that references this conversion
+		var element models.LinkElement
+		err = h.db.NewSelect().
+			Model(&element).
+			Where("element_data->>'conversion_id' = ?", conversionID.String()).
+			Relation("CustomLink").
+			Scan(ctx)
+
+		if err != nil || element.CustomLink == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Conversion not found or not public")
+		}
+
+		// Check if the link is public
+		if !element.CustomLink.IsPublic {
+			return echo.NewHTTPError(http.StatusNotFound, "Conversion not found or not public")
+		}
+	} else {
+		// Found a custom link directly, check if it's public
+		if !customLink.IsPublic {
+			return echo.NewHTTPError(http.StatusNotFound, "Conversion not found or not public")
+		}
+	}
+
+	// Return conversion data
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"conversion_id":        conversion.ID,
+		"playlist_name":        conversion.PlaylistName,
+		"cover_image":          conversion.SpotifyCoverImage,
+		"track_count":          conversion.TrackCount,
+		"spotify_playlist_url": conversion.SpotifyPlaylistURL,
+		"youtube_playlist_url": conversion.YouTubePlaylistURL,
+		"songs":                conversion.ConversionLog,
+	})
+}

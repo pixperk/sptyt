@@ -132,6 +132,7 @@ func main() {
 	e.GET("/api/l/:slug", customLinkHandler.GetLinkBySlugPublic)                              // API to get link data
 	e.POST("/api/l/:slug/verify", customLinkHandler.VerifyLinkPassword)                       // Verify password for protected link
 	e.GET("/api/track/:link_id/:element_id", customLinkHandler.TrackElementClick)             // Track element click and redirect
+	e.GET("/api/l/conversions/:conversion_id/songs", customLinkHandler.GetConversionSongsPublic) // Get songs from conversion (public)
 
 	// Protected API routes (require Clerk authentication)
 	if cfg.ClerkSecretKey != "" {
