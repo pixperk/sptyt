@@ -202,13 +202,25 @@ FRONTEND_URL=https://yourdomain.com
 - Counter increments before async job processing
 - Race-safe without distributed locks
 
-## Coming Soon
+## New: Custom Bento-Style Links ✨
 
-### Custom Link Generation
-Create shareable links for converted playlists with configurable content options. Users can choose what to include in their shared links:
-- Official music videos
-- Lyric videos
-- Genius lyrics links
-- Spotify track links
+### Bento-Style Link Builder
+Create beautiful, customizable shareable links with a modular grid layout inspired by Bento.me:
 
-Each custom link generates a beautiful public landing page displaying the playlist with all selected content types. Free tier links expire after 7 days, while premium links are permanent. Optional password protection available for private shares.
+**Features:**
+- **Flexible Grid Layout**: Each element has custom size (1x1, 2x1, 2x2, etc.)
+- **Rich Element Types**:
+  - Song cards with Spotify, YouTube, YouTube Lyrics, and Genius links
+  - Playlist cards from your converted playlists
+  - Custom text/HTML blocks
+  - Social media links with icons
+  - Standalone images
+- **Per-Element Styling**: Custom colors, gradients, borders, padding, and text styles
+- **Page Customization**: Set background colors and theme (light/dark/auto)
+- **Premium Features**:
+  - Password protection with bcrypt encryption
+  - Custom slugs (e.g., `sptyt.xyz/l/my-music`)
+  - Unlimited links and elements
+- **Analytics**: Track page views and element clicks
+- **Free Tier**: 3 links, 10 elements per link, links expire after 7 days
+
