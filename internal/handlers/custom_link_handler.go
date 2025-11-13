@@ -297,6 +297,47 @@ func (h *CustomLinkHandler) AddElement(c echo.Context) error {
 	return c.JSON(http.StatusCreated, element)
 }
 
+// UpdateElement updates an existing element in a custom link
+func (h *CustomLinkHandler) UpdateElement(c echo.Context) error {
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	linkID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
+	}
+
+	elementID, err := uuid.Parse(c.Param("element_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid element ID")
+	}
+
+	ctx := context.Background()
+
+	var user models.User
+	err = h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	var req services.UpdateElementRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+	}
+
+	err = h.service.UpdateElement(ctx, linkID, user.ID, elementID, req)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Element updated successfully"})
+}
+
 // ReorderElements updates element display order
 func (h *CustomLinkHandler) ReorderElements(c echo.Context) error {
 	clerkUserID, ok := auth.GetClerkUserID(c)

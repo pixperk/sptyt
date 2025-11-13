@@ -243,6 +243,46 @@ func (s *CustomLinkService) AddElement(ctx context.Context, linkID, userID uuid.
 	return element, nil
 }
 
+// UpdateElement updates an existing element in a custom link
+func (s *CustomLinkService) UpdateElement(ctx context.Context, linkID, userID, elementID uuid.UUID, req UpdateElementRequest) error {
+	// Verify ownership through link
+	var link models.CustomLink
+	err := s.db.NewSelect().
+		Model(&link).
+		Where("id = ? AND user_id = ?", linkID, userID).
+		Scan(ctx)
+	if err != nil {
+		return fmt.Errorf("custom link not found")
+	}
+
+	update := s.db.NewUpdate().
+		Model((*models.LinkElement)(nil)).
+		Where("id = ? AND custom_link_id = ?", elementID, linkID).
+		Set("updated_at = ?", time.Now())
+
+	if req.ElementData != nil {
+		update = update.Set("element_data = ?", req.ElementData)
+	}
+	if req.DisplayIndex != nil {
+		update = update.Set("display_index = ?", *req.DisplayIndex)
+	}
+	if req.IsVisible != nil {
+		update = update.Set("is_visible = ?", *req.IsVisible)
+	}
+
+	result, err := update.Exec(ctx)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("element not found")
+	}
+
+	return nil
+}
+
 // ReorderElements updates the display order of elements
 func (s *CustomLinkService) ReorderElements(ctx context.Context, linkID, userID uuid.UUID, order []ElementOrder) error {
 	// Verify ownership
@@ -497,8 +537,15 @@ type UpdateLinkRequest struct {
 }
 
 type AddElementRequest struct {
-	ElementType string              `json:"element_type" validate:"required"`
-	ElementData models.ElementData  `json:"element_data" validate:"required"`
+	ElementType  string             `json:"element_type" validate:"required"`
+	ElementData  models.ElementData `json:"element_data" validate:"required"`
+	DisplayIndex int                `json:"display_index"`
+}
+
+type UpdateElementRequest struct {
+	ElementData  *models.ElementData `json:"element_data"`
+	DisplayIndex *int                `json:"display_index"`
+	IsVisible    *bool               `json:"is_visible"`
 }
 
 type ElementOrder struct {

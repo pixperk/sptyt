@@ -184,6 +184,7 @@ func main() {
 		api.PUT("/links/:id", customLinkHandler.UpdateCustomLink)                            // Update custom link
 		api.DELETE("/links/:id", customLinkHandler.DeleteCustomLink)                         // Delete custom link
 		api.POST("/links/:id/elements", customLinkHandler.AddElement)                        // Add element to link
+		api.PATCH("/links/:id/elements/:element_id", customLinkHandler.UpdateElement)        // Update element
 		api.PUT("/links/:id/elements/reorder", customLinkHandler.ReorderElements)            // Reorder elements
 		api.DELETE("/links/:id/elements/:element_id", customLinkHandler.DeleteElement)       // Delete element
 		api.GET("/links/:id/analytics", customLinkHandler.GetLinkAnalytics)                  // Get link analytics
