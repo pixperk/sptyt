@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// CustomLink represents a shareable custom link with Bento-style grid elements
+// CustomLink represents a shareable custom link with simple card grid layout
 type CustomLink struct {
 	bun.BaseModel `bun:"table:custom_links,alias:cl"`
 
@@ -16,7 +16,6 @@ type CustomLink struct {
 	Slug                string     `bun:",unique,notnull" json:"slug"`                          // URL-safe identifier
 	Title               string     `bun:",notnull" json:"title"`
 	Description         string     `bun:"" json:"description,omitempty"`
-	BackgroundColor     string     `bun:",default:'#ffffff'" json:"background_color"`           // Page background color
 	Theme               string     `bun:",notnull,default:'auto'" json:"theme"`                 // light, dark, auto
 	IsPasswordProtected bool       `bun:",notnull,default:false" json:"is_password_protected"`
 	PasswordHash        string     `bun:"" json:"-"`                                            // Never expose in JSON
@@ -58,17 +57,12 @@ type LinkElement struct {
 	CustomLink *CustomLink `bun:"rel:belongs-to,join:custom_link_id=id" json:"-"`
 }
 
-// ElementData contains the flexible data for different element types (Bento-style)
+// ElementData contains the flexible data for different element types
 type ElementData struct {
-	// Bento Grid Styling (applies to all element types)
-	GridColumn     string `json:"grid_column,omitempty"`      // CSS grid column (e.g., "span 2")
-	GridRow        string `json:"grid_row,omitempty"`         // CSS grid row (e.g., "span 2")
-	BackgroundColor string `json:"background_color,omitempty"` // Element background (#hex or gradient)
-	BorderRadius   string `json:"border_radius,omitempty"`    // Border radius (e.g., "12px")
-	BorderColor    string `json:"border_color,omitempty"`     // Border color
-	TextColor      string `json:"text_color,omitempty"`       // Text color
-	FontSize       string `json:"font_size,omitempty"`        // Font size (e.g., "16px", "1rem")
-	Padding        string `json:"padding,omitempty"`          // Padding (e.g., "20px")
+	// Minimal styling (optional, frontend handles most styling)
+	BackgroundColor string `json:"background_color,omitempty"` // Element background color
+	BorderRadius    string `json:"border_radius,omitempty"`    // Border radius (e.g., "12px")
+	TextColor       string `json:"text_color,omitempty"`       // Text color
 
 	// Common fields for song and playlist
 	Title       string `json:"title,omitempty"`        // Track name or playlist name

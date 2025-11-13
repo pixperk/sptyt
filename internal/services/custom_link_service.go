@@ -66,7 +66,6 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 		Slug:                slug,
 		Title:               req.Title,
 		Description:         req.Description,
-		BackgroundColor:     req.BackgroundColor,
 		Theme:               req.Theme,
 		IsPasswordProtected: req.Password != "",
 		PasswordHash:        passwordHash,
@@ -157,9 +156,6 @@ func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID
 	}
 	if req.Description != nil {
 		update = update.Set("description = ?", *req.Description)
-	}
-	if req.BackgroundColor != nil {
-		update = update.Set("background_color = ?", *req.BackgroundColor)
 	}
 	if req.Theme != nil {
 		update = update.Set("theme = ?", *req.Theme)
@@ -483,23 +479,21 @@ func (s *CustomLinkService) generateUniqueSlug(ctx context.Context, title string
 // Request/Response types
 
 type CreateLinkRequest struct {
-	Title           string     `json:"title" validate:"required"`
-	Description     string     `json:"description"`
-	CustomSlug      string     `json:"custom_slug"`      // Premium only
-	BackgroundColor string     `json:"background_color"` // Page background color
-	Theme           string     `json:"theme"`
-	Password        string     `json:"password"`     // Premium only
-	ConversionID    *uuid.UUID `json:"conversion_id"`
-	IsPublic        bool       `json:"is_public"`
-	IsPremium       bool       `json:"-"` // Set by handler based on user
+	Title        string     `json:"title" validate:"required"`
+	Description  string     `json:"description"`
+	CustomSlug   string     `json:"custom_slug"` // Premium only
+	Theme        string     `json:"theme"`
+	Password     string     `json:"password"`      // Premium only
+	ConversionID *uuid.UUID `json:"conversion_id"`
+	IsPublic     bool       `json:"is_public"`
+	IsPremium    bool       `json:"-"` // Set by handler based on user
 }
 
 type UpdateLinkRequest struct {
-	Title           *string `json:"title"`
-	Description     *string `json:"description"`
-	BackgroundColor *string `json:"background_color"`
-	Theme           *string `json:"theme"`
-	IsPublic        *bool   `json:"is_public"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Theme       *string `json:"theme"`
+	IsPublic    *bool   `json:"is_public"`
 }
 
 type AddElementRequest struct {
