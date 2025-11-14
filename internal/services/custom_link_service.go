@@ -522,19 +522,24 @@ func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID
 		return nil, err
 	}
 
-	// Get element-wise click counts
+	// Get element-wise click counts with element details
 	type ElementStats struct {
-		ElementID  uuid.UUID `bun:"link_element_id"`
-		ClickCount int       `bun:"click_count"`
+		ElementID   uuid.UUID `bun:"element_id"`
+		ElementType string    `bun:"element_type"`
+		Title       string    `bun:"title"`
+		ClickCount  int       `bun:"click_count"`
 	}
 
 	var elementStats []ElementStats
 	err = s.db.NewSelect().
-		Model((*models.LinkAnalytics)(nil)).
-		Column("link_element_id").
-		ColumnExpr("COUNT(*) as click_count").
-		Where("custom_link_id = ? AND event_type = ? AND link_element_id IS NOT NULL", linkID, "element_click").
-		Group("link_element_id").
+		TableExpr("link_elements AS le").
+		Column("le.id AS element_id").
+		Column("le.element_type").
+		ColumnExpr("COALESCE(le.element_data->>'title', le.element_data->>'custom_text', 'Untitled') AS title").
+		ColumnExpr("COUNT(la.id) AS click_count").
+		Join("LEFT JOIN link_analytics AS la ON la.link_element_id = le.id AND la.event_type = 'element_click'").
+		Where("le.custom_link_id = ?", linkID).
+		Group("le.id, le.element_type, le.element_data").
 		Order("click_count DESC").
 		Scan(ctx, &elementStats)
 	if err != nil {
