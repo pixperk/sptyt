@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -42,6 +43,7 @@ func main() {
 	asynqRedisAddr := os.Getenv("ASYNQ_REDIS_ADDR")
 	asynqRedisPassword := os.Getenv("ASYNQ_REDIS_PASSWORD")
 	rateLimitStr := os.Getenv("RATE_LIMIT_PER_MINUTE")
+	allowedOrigins := os.Getenv("ALLOWED_ORIGINS") // Comma-separated list of allowed origins
 
 	if spotifyClientID == "" || spotifyClientSecret == "" || youtubeAPIKey == "" || geniusAccessToken == "" {
 		log.Fatal("Missing required environment variables")
@@ -99,8 +101,14 @@ func main() {
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
+
+	// CORS configuration
+	origins := []string{"https://sptyt.xyz", "http://localhost:3000"}
+	if allowedOrigins != "" {
+		origins = strings.Split(allowedOrigins, ",")
+	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     []string{"https://sptyt.xyz", "http://localhost:3000"},
+		AllowOrigins:     origins,
 		AllowCredentials: true,
 		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
