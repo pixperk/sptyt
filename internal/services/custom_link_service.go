@@ -513,6 +513,16 @@ func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID
 		return nil, err
 	}
 
+	// Get unique page views (unique IP per day)
+	uniqueViews, err := s.db.NewSelect().
+		Model((*models.LinkAnalytics)(nil)).
+		ColumnExpr("COUNT(DISTINCT (ip_address, DATE(created_at)))").
+		Where("custom_link_id = ? AND event_type = ?", linkID, "page_view").
+		Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// Get total element clicks
 	elementClicks, err := s.db.NewSelect().
 		Model((*models.LinkAnalytics)(nil)).
@@ -559,6 +569,7 @@ func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID
 	return map[string]interface{}{
 		"link_id":         linkID,
 		"total_views":     pageViews,
+		"unique_views":    uniqueViews,
 		"total_clicks":    elementClicks,
 		"recent_views":    recentViews,
 		"element_stats":   elementStats,
