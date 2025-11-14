@@ -64,13 +64,24 @@ func main() {
 		}
 	}
 
-	redisCache, err := cache.NewRedisCache(redisURL)
-	if err != nil {
-		log.Fatal("Failed to connect to Redis:", err)
-	}
-	defer redisCache.Close()
+	// Redis is optional - app will run without it but rate limiting will be disabled
+	var redisCache *cache.RedisCache
+	var rateLimiter *custommw.RateLimiter
 
-	rateLimiter := custommw.NewRateLimiter(redisCache.GetClient(), rateLimit)
+	if redisURL != "" {
+		var err error
+		redisCache, err = cache.NewRedisCache(redisURL)
+		if err != nil {
+			log.Printf("WARNING: Failed to connect to Redis: %v", err)
+			log.Println("Running without Redis - rate limiting and caching disabled")
+		} else {
+			defer redisCache.Close()
+			rateLimiter = custommw.NewRateLimiter(redisCache.GetClient(), rateLimit)
+			log.Println("Redis connected successfully")
+		}
+	} else {
+		log.Println("No Redis URL provided - running without Redis")
+	}
 
 	spotifyClient := spotify.NewClient(spotifyClientID, spotifyClientSecret)
 	youtubeClient := youtube.NewClient(youtubeAPIKey)
@@ -113,7 +124,15 @@ func main() {
 		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
 	}))
-	e.Use(rateLimiter.Middleware())
+
+	// Only use rate limiter if Redis is available
+	if rateLimiter != nil {
+		e.Use(rateLimiter.Middleware())
+		log.Println("Rate limiting enabled")
+	} else {
+		log.Println("Rate limiting disabled (no Redis)")
+	}
+
 	e.Use(custommw.MobileAppRedirect())
 
 	// Static files

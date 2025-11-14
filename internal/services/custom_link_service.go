@@ -22,6 +22,17 @@ func NewCustomLinkService(db *bun.DB) *CustomLinkService {
 
 // CreateCustomLink creates a new custom link for a user
 func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UUID, req CreateLinkRequest) (*models.CustomLink, error) {
+	// Validate input lengths
+	if len(req.Title) > 200 {
+		return nil, fmt.Errorf("title too long (max 200 characters)")
+	}
+	if len(req.Description) > 1000 {
+		return nil, fmt.Errorf("description too long (max 1000 characters)")
+	}
+	if len(req.CustomSlug) > 100 {
+		return nil, fmt.Errorf("custom slug too long (max 100 characters)")
+	}
+
 	// Generate slug
 	var slug string
 	if req.CustomSlug != "" {
@@ -86,6 +97,14 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 
 // GetUserLinks returns all custom links for a user
 func (s *CustomLinkService) GetUserLinks(ctx context.Context, userID uuid.UUID, limit, offset int) ([]models.CustomLink, int, error) {
+	// Enforce pagination limits
+	if limit <= 0 || limit > 100 {
+		limit = 20 // Default to 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
 	var links []models.CustomLink
 
 	query := s.db.NewSelect().
@@ -146,6 +165,14 @@ func (s *CustomLinkService) GetLinkByID(ctx context.Context, linkID, userID uuid
 
 // UpdateCustomLink updates an existing custom link
 func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID uuid.UUID, req UpdateLinkRequest) error {
+	// Validate input lengths
+	if req.Title != nil && len(*req.Title) > 200 {
+		return fmt.Errorf("title too long (max 200 characters)")
+	}
+	if req.Description != nil && len(*req.Description) > 1000 {
+		return fmt.Errorf("description too long (max 1000 characters)")
+	}
+
 	update := s.db.NewUpdate().
 		Model((*models.CustomLink)(nil)).
 		Where("id = ? AND user_id = ?", linkID, userID).
@@ -207,6 +234,14 @@ func (s *CustomLinkService) DeleteCustomLink(ctx context.Context, linkID, userID
 
 // AddElement adds an element to a custom link
 func (s *CustomLinkService) AddElement(ctx context.Context, linkID, userID uuid.UUID, req AddElementRequest) (*models.LinkElement, error) {
+	// Validate element data
+	if len(req.ElementData.CustomText) > 5000 {
+		return nil, fmt.Errorf("custom text too long (max 5000 characters)")
+	}
+	if len(req.ElementData.Title) > 500 {
+		return nil, fmt.Errorf("title too long (max 500 characters)")
+	}
+
 	// Verify ownership
 	var link models.CustomLink
 	err := s.db.NewSelect().
@@ -285,6 +320,11 @@ func (s *CustomLinkService) UpdateElement(ctx context.Context, linkID, userID, e
 
 // BatchUpdateElements updates multiple elements at once
 func (s *CustomLinkService) BatchUpdateElements(ctx context.Context, linkID, userID uuid.UUID, updates []ElementUpdate) error {
+	// Enforce batch update limits
+	if len(updates) > 50 {
+		return fmt.Errorf("too many updates in batch (max 50, got %d)", len(updates))
+	}
+
 	// Verify ownership
 	var link models.CustomLink
 	err := s.db.NewSelect().
