@@ -283,6 +283,40 @@ func (s *CustomLinkService) UpdateElement(ctx context.Context, linkID, userID, e
 	return nil
 }
 
+// BatchUpdateElements updates multiple elements at once
+func (s *CustomLinkService) BatchUpdateElements(ctx context.Context, linkID, userID uuid.UUID, updates []ElementUpdate) error {
+	// Verify ownership
+	var link models.CustomLink
+	err := s.db.NewSelect().
+		Model(&link).
+		Where("id = ? AND user_id = ?", linkID, userID).
+		Scan(ctx)
+	if err != nil {
+		return fmt.Errorf("custom link not found")
+	}
+
+	// Update each element in a transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, update := range updates {
+		_, err := tx.NewUpdate().
+			Model((*models.LinkElement)(nil)).
+			Set("element_data = ?", update.ElementData).
+			Set("updated_at = ?", time.Now()).
+			Where("id = ? AND custom_link_id = ?", update.ElementID, linkID).
+			Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to update element %s: %w", update.ElementID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 // ReorderElements updates the display order of elements
 func (s *CustomLinkService) ReorderElements(ctx context.Context, linkID, userID uuid.UUID, order []ElementOrder) error {
 	// Verify ownership
@@ -551,4 +585,13 @@ type UpdateElementRequest struct {
 type ElementOrder struct {
 	ElementID uuid.UUID `json:"element_id"`
 	Index     int       `json:"index"`
+}
+
+type BatchUpdateElementRequest struct {
+	Updates []ElementUpdate `json:"updates" validate:"required"`
+}
+
+type ElementUpdate struct {
+	ElementID   uuid.UUID           `json:"element_id" validate:"required"`
+	ElementData models.ElementData  `json:"element_data"`
 }

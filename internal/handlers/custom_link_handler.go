@@ -338,6 +338,48 @@ func (h *CustomLinkHandler) UpdateElement(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "Element updated successfully"})
 }
 
+// BatchUpdateElements updates multiple elements at once
+func (h *CustomLinkHandler) BatchUpdateElements(c echo.Context) error {
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	linkID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
+	}
+
+	ctx := context.Background()
+
+	var user models.User
+	err = h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	var req services.BatchUpdateElementRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+	}
+
+	if len(req.Updates) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "No updates provided")
+	}
+
+	err = h.service.BatchUpdateElements(ctx, linkID, user.ID, req.Updates)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": fmt.Sprintf("%d elements updated successfully", len(req.Updates)),
+	})
+}
+
 // ReorderElements updates element display order
 func (h *CustomLinkHandler) ReorderElements(c echo.Context) error {
 	clerkUserID, ok := auth.GetClerkUserID(c)
