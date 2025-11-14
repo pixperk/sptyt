@@ -549,7 +549,7 @@ func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID
 		ColumnExpr("COUNT(la.id) AS click_count").
 		Join("LEFT JOIN link_analytics AS la ON la.link_element_id = le.id AND la.event_type = 'element_click'").
 		Where("le.custom_link_id = ?", linkID).
-		Group("le.id, le.element_type, le.element_data").
+		Group("le.id, le.element_type").
 		Order("click_count DESC").
 		Scan(ctx, &elementStats)
 	if err != nil {
