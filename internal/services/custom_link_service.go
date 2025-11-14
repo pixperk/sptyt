@@ -543,8 +543,8 @@ func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID
 	var elementStats []ElementStats
 	err = s.db.NewSelect().
 		TableExpr("link_elements AS le").
-		Column("le.id AS element_id").
-		Column("le.element_type").
+		ColumnExpr("le.id AS element_id").
+		ColumnExpr("le.element_type AS element_type").
 		ColumnExpr("COALESCE(le.element_data->>'title', le.element_data->>'custom_text', 'Untitled') AS title").
 		ColumnExpr("COUNT(la.id) AS click_count").
 		Join("LEFT JOIN link_analytics AS la ON la.link_element_id = le.id AND la.event_type = 'element_click'").
