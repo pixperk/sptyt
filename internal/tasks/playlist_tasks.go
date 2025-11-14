@@ -40,13 +40,13 @@ func NewPlaylistConversionTask(payload PlaylistConversionPayload) (*asynq.Task, 
 
 // AnalyticsUpdatePayload represents the task payload for analytics updates
 type AnalyticsUpdatePayload struct {
-	UserID             string `json:"user_id"`               // Database UUID
-	SpotifyType        string `json:"spotify_type"`          // "playlist" or "album"
-	IsSuccess          bool   `json:"is_success"`            // Whether conversion succeeded
-	TrackCount         int    `json:"track_count"`           // Total tracks
-	SuccessCount       int    `json:"success_count"`         // Successfully matched tracks
-	FailureCount       int    `json:"failure_count"`         // Failed tracks
-	CountsAgainstQuota bool   `json:"counts_against_quota"`  // Whether conversion counts against quota
+	UserID             string `json:"user_id"`              // Database UUID
+	SpotifyType        string `json:"spotify_type"`         // "playlist" or "album"
+	IsSuccess          bool   `json:"is_success"`           // Whether conversion succeeded
+	TrackCount         int    `json:"track_count"`          // Total tracks
+	SuccessCount       int    `json:"success_count"`        // Successfully matched tracks
+	FailureCount       int    `json:"failure_count"`        // Failed tracks
+	CountsAgainstQuota bool   `json:"counts_against_quota"` // Whether conversion counts against quota
 }
 
 // NewAnalyticsUpdateTask creates a new Asynq task for analytics updates
@@ -69,7 +69,6 @@ func NewPlaylistConversionProcessor(converterService *services.PlaylistConverter
 	}
 }
 
-// ProcessPlaylistConversion processes a playlist conversion task
 func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Context, t *asynq.Task) error {
 	var payload PlaylistConversionPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -78,7 +77,6 @@ func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Cont
 
 	log.Printf("Processing playlist conversion task: %s for user: %s", payload.ConversionID, payload.UserID)
 
-	// Create conversion job
 	job := &services.ConversionJob{
 		ConversionID:        payload.ConversionID,
 		UserID:              payload.UserID,

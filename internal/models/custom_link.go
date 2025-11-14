@@ -86,8 +86,10 @@ type ElementData struct {
 	PlaylistYouTubeURL string     `json:"playlist_youtube_url,omitempty"`
 
 	// Custom text/html element
-	CustomText  string `json:"custom_text,omitempty"`
-	CustomHTML  string `json:"custom_html,omitempty"`
+	CustomText string `json:"custom_text,omitempty"`
+	CustomHTML string `json:"custom_html,omitempty"`
+	Font       string `json:"font,omitempty"`        // Font family for text elements
+	Size       string `json:"size,omitempty"`        // Text size: "small", "normal", "big"
 
 	// Link element (simple link with icon)
 	LinkURL  string `json:"link_url,omitempty"`   // For simple link elements
