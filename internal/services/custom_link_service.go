@@ -449,8 +449,27 @@ func (s *CustomLinkService) IncrementViewCount(ctx context.Context, linkID uuid.
 	return err
 }
 
-// TrackPageView records a page view event in analytics
+// TrackPageView records a page view event in analytics and increments unique view count
 func (s *CustomLinkService) TrackPageView(ctx context.Context, linkID uuid.UUID, ipAddress, userAgent, referrer string) error {
+	now := time.Now()
+
+	// Check if this IP has visited today
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	todayEnd := todayStart.Add(24 * time.Hour)
+
+	existingView, err := s.db.NewSelect().
+		Model((*models.LinkAnalytics)(nil)).
+		Where("custom_link_id = ?", linkID).
+		Where("event_type = ?", "page_view").
+		Where("ip_address = ?", ipAddress).
+		Where("created_at >= ?", todayStart).
+		Where("created_at < ?", todayEnd).
+		Exists(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Record the page view in analytics
 	analytics := &models.LinkAnalytics{
 		CustomLinkID:  linkID,
 		LinkElementID: nil,
@@ -458,10 +477,23 @@ func (s *CustomLinkService) TrackPageView(ctx context.Context, linkID uuid.UUID,
 		IPAddress:     ipAddress,
 		UserAgent:     userAgent,
 		Referrer:      referrer,
-		CreatedAt:     time.Now(),
+		CreatedAt:     now,
 	}
 
-	_, err := s.db.NewInsert().Model(analytics).Exec(ctx)
+	_, err = s.db.NewInsert().Model(analytics).Exec(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Only increment view_count if this is a unique visitor today
+	if !existingView {
+		_, err = s.db.NewUpdate().
+			Model((*models.CustomLink)(nil)).
+			Set("view_count = view_count + 1").
+			Where("id = ?", linkID).
+			Exec(ctx)
+	}
+
 	return err
 }
 
@@ -504,19 +536,9 @@ func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID
 		return nil, fmt.Errorf("custom link not found")
 	}
 
-	// Get total page views
+	// Get total page views (all visits)
 	pageViews, err := s.db.NewSelect().
 		Model((*models.LinkAnalytics)(nil)).
-		Where("custom_link_id = ? AND event_type = ?", linkID, "page_view").
-		Count(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get unique page views (unique IP per day)
-	uniqueViews, err := s.db.NewSelect().
-		Model((*models.LinkAnalytics)(nil)).
-		ColumnExpr("COUNT(DISTINCT (ip_address, DATE(created_at)))").
 		Where("custom_link_id = ? AND event_type = ?", linkID, "page_view").
 		Count(ctx)
 	if err != nil {
@@ -570,11 +592,10 @@ func (s *CustomLinkService) GetLinkAnalytics(ctx context.Context, linkID, userID
 	return map[string]interface{}{
 		"link_id":         linkID,
 		"total_views":     pageViews,
-		"unique_views":    uniqueViews,
+		"unique_views":    link.ViewCount, // view_count stores unique daily visitors
 		"total_clicks":    elementClicks,
 		"recent_views":    recentViews,
 		"element_stats":   elementStats,
-		"view_count":      link.ViewCount,
 	}, nil
 }
 
