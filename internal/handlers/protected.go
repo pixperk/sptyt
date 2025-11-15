@@ -251,7 +251,7 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 	})
 }
 
-// CancelSubscription cancels the user's subscription
+// CancelSubscription cancels the user's subscription at period end
 func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
 	user, err := ph.GetOrCreateUser(c)
 	if err != nil {
@@ -262,11 +262,51 @@ func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "No active subscription")
 	}
 
-	// TODO: Call DodoPay API to cancel subscription
-	// For now, just mark as cancelled in database
+	// Check if subscription is already cancelled
+	if user.SubscriptionStatus == "cancelled" {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"message":      "Subscription already cancelled",
+			"access_until": user.SubscriptionEndsAt,
+		})
+	}
+
+	// Initialize DodoPay client
+	dodopayAPIKey := os.Getenv("DODOPAY_API_KEY")
+	dodopayAPIHost := os.Getenv("DODOPAY_API_HOST")
+
+	if dodopayAPIKey == "" {
+		log.Println("CancelSubscription: Missing DodoPay API key")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "Payment system not configured")
+	}
+
+	var clientOptions []option.RequestOption
+	clientOptions = append(clientOptions, option.WithBearerToken(dodopayAPIKey))
+
+	if dodopayAPIHost != "" {
+		clientOptions = append(clientOptions, option.WithBaseURL(dodopayAPIHost))
+	}
+
+	client := dodopayments.NewClient(clientOptions...)
 
 	ctx, cancel := database.NewQueryContext()
 	defer cancel()
+
+	// Cancel subscription at next billing date (cancel_at_period_end behavior)
+	log.Printf("CancelSubscription: Cancelling subscription %s for user %s", user.SubscriptionID, user.Email)
+
+	_, err = client.Subscriptions.Update(ctx, user.SubscriptionID, dodopayments.SubscriptionUpdateParams{
+		CancelAtNextBillingDate: dodopayments.F(true),
+	})
+
+	if err != nil {
+		log.Printf("CancelSubscription: DodoPay API error: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to cancel subscription via payment provider")
+	}
+
+	log.Printf("CancelSubscription: Successfully set cancel_at_next_billing_date for subscription %s", user.SubscriptionID)
+
+	// Update local database to reflect cancellation
+	// Note: The webhook will handle the final status update when DodoPay processes it
 	_, err = ph.db.NewUpdate().
 		Model(user).
 		Set("subscription_status = ?", "cancelled").
@@ -275,13 +315,15 @@ func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
 		Exec(ctx)
 
 	if err != nil {
-		log.Printf("Failed to cancel subscription: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to cancel subscription")
+		log.Printf("CancelSubscription: Failed to update database: %v", err)
+		// Don't fail the request since DodoPay already processed it
+		log.Println("CancelSubscription: Webhook will update status later")
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message":      "Subscription cancelled successfully",
+		"message":      "Subscription cancelled successfully. Access will continue until the end of the current billing period.",
 		"access_until": user.SubscriptionEndsAt,
+		"cancelled_at": time.Now(),
 	})
 }
 
