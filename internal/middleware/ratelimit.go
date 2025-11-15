@@ -6,26 +6,108 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
 )
 
+// rateLimitEntry tracks request counts and expiration for in-memory fallback
+type rateLimitEntry struct {
+	count     int
+	expiresAt time.Time
+}
+
 type RateLimiter struct {
-	client       *redis.Client
-	limit        int
-	window       time.Duration
-	keyPrefix    string
+	client        *redis.Client
+	limit         int
+	fallbackLimit int // Stricter limit when Redis is unavailable (default: 50/min)
+	window        time.Duration
+	keyPrefix     string
+
+	// In-memory fallback (used when Redis is down)
+	fallbackCache map[string]*rateLimitEntry
+	fallbackMu    sync.RWMutex
+	stopCleanup   chan struct{}
+	inFallback    bool // Track if we're in fallback mode
+	fallbackMu2   sync.RWMutex
 }
 
 func NewRateLimiter(client *redis.Client, requestsPerMinute int) *RateLimiter {
-	return &RateLimiter{
-		client:    client,
-		limit:     requestsPerMinute,
-		window:    time.Minute,
-		keyPrefix: "ratelimit:",
+	rl := &RateLimiter{
+		client:        client,
+		limit:         requestsPerMinute,
+		fallbackLimit: 50, // Stricter limit in fallback mode
+		window:        time.Minute,
+		keyPrefix:     "ratelimit:",
+		fallbackCache: make(map[string]*rateLimitEntry),
+		stopCleanup:   make(chan struct{}),
+		inFallback:    false,
 	}
+
+	// Start cleanup goroutine for in-memory cache
+	go rl.cleanupExpiredEntries()
+
+	return rl
+}
+
+// cleanupExpiredEntries removes expired entries from in-memory cache
+func (rl *RateLimiter) cleanupExpiredEntries() {
+	ticker := time.NewTicker(30 * time.Second) // Cleanup every 30 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			rl.fallbackMu.Lock()
+			now := time.Now()
+			for key, entry := range rl.fallbackCache {
+				if now.After(entry.expiresAt) {
+					delete(rl.fallbackCache, key)
+				}
+			}
+			rl.fallbackMu.Unlock()
+
+		case <-rl.stopCleanup:
+			return
+		}
+	}
+}
+
+// Close stops the cleanup goroutine
+func (rl *RateLimiter) Close() {
+	close(rl.stopCleanup)
+}
+
+// checkFallbackRateLimit uses in-memory rate limiting when Redis is unavailable
+func (rl *RateLimiter) checkFallbackRateLimit(ip string) (int, int, bool) {
+	rl.fallbackMu.Lock()
+	defer rl.fallbackMu.Unlock()
+
+	now := time.Now()
+	key := rl.keyPrefix + ip
+
+	entry, exists := rl.fallbackCache[key]
+	if !exists || now.After(entry.expiresAt) {
+		// Create new entry
+		entry = &rateLimitEntry{
+			count:     1,
+			expiresAt: now.Add(rl.window),
+		}
+		rl.fallbackCache[key] = entry
+		return entry.count, rl.fallbackLimit - entry.count, false
+	}
+
+	// Increment existing entry
+	entry.count++
+	remaining := rl.fallbackLimit - entry.count
+	if remaining < 0 {
+		remaining = 0
+	}
+	exceeded := entry.count > rl.fallbackLimit
+
+	return entry.count, remaining, exceeded
 }
 
 func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
@@ -50,15 +132,43 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 
 			current, err := rl.client.Incr(ctx, key).Result()
 			if err != nil {
-				// CRITICAL: Redis is down - rate limiting is bypassed!
-				// Log the error and alert, but allow request to proceed
-				log.Printf("CRITICAL: Rate limiter Redis error (bypassing rate limit): %v", err)
-				// In production, you should also:
-				// - Send alert to monitoring system
-				// - Increment a metric counter
-				// - Consider returning error instead if you want fail-closed behavior
+				// Redis is down - fall back to in-memory rate limiting
+				log.Printf("CRITICAL: Redis unavailable, using in-memory rate limiting (stricter: %d req/min): %v", rl.fallbackLimit, err)
+
+				// Track fallback mode for monitoring
+				rl.fallbackMu2.Lock()
+				if !rl.inFallback {
+					rl.inFallback = true
+					log.Printf("ALERT: Rate limiter entered FALLBACK MODE - stricter limits active (%d req/min per IP)", rl.fallbackLimit)
+				}
+				rl.fallbackMu2.Unlock()
+
+				// Use in-memory rate limiting with stricter limits
+				_, remaining, exceeded := rl.checkFallbackRateLimit(ip)
+
+				// Set headers with fallback limit
+				c.Response().Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.fallbackLimit))
+				c.Response().Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+				c.Response().Header().Set("X-RateLimit-Mode", "fallback") // Indicate fallback mode
+
+				if exceeded {
+					c.Response().Header().Set("Retry-After", strconv.Itoa(int(rl.window.Seconds())))
+					return c.JSON(http.StatusTooManyRequests, map[string]interface{}{
+						"error": fmt.Sprintf("rate limit exceeded: %d requests per minute allowed (fallback mode)", rl.fallbackLimit),
+						"mode":  "fallback",
+					})
+				}
+
 				return next(c)
 			}
+
+			// Redis is working - reset fallback flag if needed
+			rl.fallbackMu2.Lock()
+			if rl.inFallback {
+				rl.inFallback = false
+				log.Printf("INFO: Rate limiter recovered from fallback mode - Redis operational")
+			}
+			rl.fallbackMu2.Unlock()
 
 			if current == 1 {
 				rl.client.Expire(ctx, key, rl.window)
@@ -71,6 +181,7 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 
 			c.Response().Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
 			c.Response().Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+			c.Response().Header().Set("X-RateLimit-Mode", "redis") // Indicate Redis mode
 
 			if current > int64(rl.limit) {
 				c.Response().Header().Set("Retry-After", strconv.Itoa(int(rl.window.Seconds())))
