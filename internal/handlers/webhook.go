@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/pixperk/sptyt/internal/database"
 	"context"
 	"encoding/json"
 	"io"
@@ -116,7 +117,8 @@ func (wh *WebhookHandler) DodoPayWebhook(c echo.Context) error {
 		}
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Handle different event types
 	switch event.Type {

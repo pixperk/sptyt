@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/pixperk/sptyt/internal/database"
 
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
@@ -30,7 +31,8 @@ func (h *AnalyticsHandler) GetUserAnalytics(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
@@ -54,38 +56,38 @@ func (h *AnalyticsHandler) GetUserAnalytics(c echo.Context) error {
 	if err != nil {
 		// No analytics record yet, return zeros
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"total_conversions":       0,
-			"successful_conversions":  0,
-			"failed_conversions":      0,
-			"playlists_converted":     0,
-			"albums_converted":        0,
-			"total_tracks_processed":  0,
-			"total_tracks_matched":    0,
-			"total_tracks_failed":     0,
-			"total_custom_links":      0,
-			"monthly_conversions":     0,
-			"success_rate":            0,
-			"track_match_rate":        0,
-			"first_conversion_at":     nil,
-			"last_conversion_at":      nil,
+			"total_conversions":      0,
+			"successful_conversions": 0,
+			"failed_conversions":     0,
+			"playlists_converted":    0,
+			"albums_converted":       0,
+			"total_tracks_processed": 0,
+			"total_tracks_matched":   0,
+			"total_tracks_failed":    0,
+			"total_custom_links":     0,
+			"monthly_conversions":    0,
+			"success_rate":           0,
+			"track_match_rate":       0,
+			"first_conversion_at":    nil,
+			"last_conversion_at":     nil,
 		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"total_conversions":       analytics.TotalConversions,
-		"successful_conversions":  analytics.SuccessfulConversions,
-		"monthly_conversions":     analytics.MonthlyConversions,
-		"failed_conversions":      analytics.FailedConversions,
-		"playlists_converted":     analytics.PlaylistsConverted,
-		"albums_converted":        analytics.AlbumsConverted,
-		"total_tracks_processed":  analytics.TotalTracksProcessed,
-		"total_tracks_matched":    analytics.TotalTracksMatched,
-		"total_tracks_failed":     analytics.TotalTracksFailed,
-		"total_custom_links":      analytics.TotalCustomLinks,
-		"success_rate":            analytics.GetSuccessRate(),
-		"track_match_rate":        analytics.GetTrackMatchRate(),
-		"first_conversion_at":     analytics.FirstConversionAt,
-		"last_conversion_at":      analytics.LastConversionAt,
+		"total_conversions":      analytics.TotalConversions,
+		"successful_conversions": analytics.SuccessfulConversions,
+		"monthly_conversions":    analytics.MonthlyConversions,
+		"failed_conversions":     analytics.FailedConversions,
+		"playlists_converted":    analytics.PlaylistsConverted,
+		"albums_converted":       analytics.AlbumsConverted,
+		"total_tracks_processed": analytics.TotalTracksProcessed,
+		"total_tracks_matched":   analytics.TotalTracksMatched,
+		"total_tracks_failed":    analytics.TotalTracksFailed,
+		"total_custom_links":     analytics.TotalCustomLinks,
+		"success_rate":           analytics.GetSuccessRate(),
+		"track_match_rate":       analytics.GetTrackMatchRate(),
+		"first_conversion_at":    analytics.FirstConversionAt,
+		"last_conversion_at":     analytics.LastConversionAt,
 	})
 }
 
@@ -97,7 +99,8 @@ func (h *AnalyticsHandler) GetUserDashboard(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
@@ -137,38 +140,38 @@ func (h *AnalyticsHandler) GetUserDashboard(c echo.Context) error {
 	// Build response
 	response := map[string]interface{}{
 		"analytics": map[string]interface{}{
-			"total_conversions":       0,
-			"successful_conversions":  0,
-			"failed_conversions":      0,
-			"playlists_converted":     0,
-			"albums_converted":        0,
-			"total_tracks_processed":  0,
-			"total_tracks_matched":    0,
-			"total_tracks_failed":     0,
-			"total_custom_links":      0,
-			"success_rate":            0.0,
-			"track_match_rate":        0.0,
-			"first_conversion_at":     nil,
-			"last_conversion_at":      nil,
+			"total_conversions":      0,
+			"successful_conversions": 0,
+			"failed_conversions":     0,
+			"playlists_converted":    0,
+			"albums_converted":       0,
+			"total_tracks_processed": 0,
+			"total_tracks_matched":   0,
+			"total_tracks_failed":    0,
+			"total_custom_links":     0,
+			"success_rate":           0.0,
+			"track_match_rate":       0.0,
+			"first_conversion_at":    nil,
+			"last_conversion_at":     nil,
 		},
 		"recent_conversions": recentConversions,
 	}
 
 	if hasAnalytics {
 		response["analytics"] = map[string]interface{}{
-			"total_conversions":       analytics.TotalConversions,
-			"successful_conversions":  analytics.SuccessfulConversions,
-			"failed_conversions":      analytics.FailedConversions,
-			"playlists_converted":     analytics.PlaylistsConverted,
-			"albums_converted":        analytics.AlbumsConverted,
-			"total_tracks_processed":  analytics.TotalTracksProcessed,
-			"total_tracks_matched":    analytics.TotalTracksMatched,
-			"total_tracks_failed":     analytics.TotalTracksFailed,
-			"total_custom_links":      analytics.TotalCustomLinks,
-			"success_rate":            analytics.GetSuccessRate(),
-			"track_match_rate":        analytics.GetTrackMatchRate(),
-			"first_conversion_at":     analytics.FirstConversionAt,
-			"last_conversion_at":      analytics.LastConversionAt,
+			"total_conversions":      analytics.TotalConversions,
+			"successful_conversions": analytics.SuccessfulConversions,
+			"failed_conversions":     analytics.FailedConversions,
+			"playlists_converted":    analytics.PlaylistsConverted,
+			"albums_converted":       analytics.AlbumsConverted,
+			"total_tracks_processed": analytics.TotalTracksProcessed,
+			"total_tracks_matched":   analytics.TotalTracksMatched,
+			"total_tracks_failed":    analytics.TotalTracksFailed,
+			"total_custom_links":     analytics.TotalCustomLinks,
+			"success_rate":           analytics.GetSuccessRate(),
+			"track_match_rate":       analytics.GetTrackMatchRate(),
+			"first_conversion_at":    analytics.FirstConversionAt,
+			"last_conversion_at":     analytics.LastConversionAt,
 		}
 	}
 
@@ -183,7 +186,8 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
@@ -247,22 +251,22 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"month":      now.Format("January 2006"),
-		"month_num":  currentMonth,
-		"year":       currentYear,
+		"month":             now.Format("January 2006"),
+		"month_num":         currentMonth,
+		"year":              currentYear,
 		"subscription_tier": user.SubscriptionTier,
-		"is_premium": user.IsPremium(),
+		"is_premium":        user.IsPremium(),
 		"limits": map[string]interface{}{
 			"max_playlists_per_month": maxPlaylists,
 			"max_songs_per_playlist":  maxSongs,
 		},
 		"usage": map[string]interface{}{
-			"playlists_converted":  monthlyConversions,
-			"playlists_remaining":  maxPlaylists - monthlyConversions,
-			"usage_percentage":     float64(monthlyConversions) / float64(maxPlaylists) * 100,
-			"total_tracks":         monthlyDetails.TotalTracks,
-			"matched_tracks":       monthlyDetails.MatchedTracks,
-			"failed_tracks":        monthlyDetails.FailedTracks,
+			"playlists_converted": monthlyConversions,
+			"playlists_remaining": maxPlaylists - monthlyConversions,
+			"usage_percentage":    float64(monthlyConversions) / float64(maxPlaylists) * 100,
+			"total_tracks":        monthlyDetails.TotalTracks,
+			"matched_tracks":      monthlyDetails.MatchedTracks,
+			"failed_tracks":       monthlyDetails.FailedTracks,
 		},
 		"can_convert": monthlyConversions < maxPlaylists,
 	})

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -73,6 +74,28 @@ func initDatabase(config DatabaseConfig) *bun.DB {
 	)
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+
+	// Configure connection pool for production scalability
+	// MaxOpenConns: Maximum number of open connections to the database
+	// - Set to 100 to handle high concurrent load while preventing database overload
+	// - PostgreSQL default max_connections is 100, so we stay within safe limits
+	sqldb.SetMaxOpenConns(100)
+
+	// MaxIdleConns: Maximum number of idle connections in the pool
+	// - Set to 25 to keep connections ready for burst traffic
+	// - Reduces latency by avoiding connection establishment overhead
+	sqldb.SetMaxIdleConns(25)
+
+	// ConnMaxLifetime: Maximum time a connection can be reused
+	// - Set to 5 minutes to prevent stale connections
+	// - Helps with load balancer connection draining and database maintenance
+	sqldb.SetConnMaxLifetime(5 * time.Minute)
+
+	// ConnMaxIdleTime: Maximum time a connection can be idle before closing
+	// - Set to 2 minutes to free up resources during low traffic
+	// - Balances resource usage with connection reuse
+	sqldb.SetConnMaxIdleTime(2 * time.Minute)
+
 	db := bun.NewDB(sqldb, pgdialect.New())
 
 	db.AddQueryHook(bundebug.NewQueryHook(
@@ -84,6 +107,7 @@ func initDatabase(config DatabaseConfig) *bun.DB {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
+	log.Printf("Database connection pool configured: MaxOpen=100, MaxIdle=25, ConnMaxLifetime=5m")
 	log.Println("Database connection established successfully")
 
 	return db

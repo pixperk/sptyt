@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/pixperk/sptyt/internal/database"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -52,7 +53,8 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
@@ -179,7 +181,8 @@ func (h *PlaylistHandler) GetConversionStatus(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
@@ -214,7 +217,8 @@ func (h *PlaylistHandler) GetUserConversions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
@@ -247,7 +251,8 @@ func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User

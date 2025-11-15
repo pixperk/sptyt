@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
 	"github.com/pixperk/sptyt/internal/cache"
+	"github.com/pixperk/sptyt/internal/database"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/pkg/errors"
 	"github.com/uptrace/bun"
@@ -53,7 +54,8 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 				return errors.ToHTTPError(errors.Unauthorized("User not authenticated"))
 			}
 
-			ctx := context.Background()
+			ctx, cancel := database.NewQueryContext()
+			defer cancel()
 
 			// Get user from database
 			var user models.User
@@ -168,7 +170,8 @@ func (pl *PlaylistLimiter) GetUserLimitsInfo(c echo.Context) error {
 		return errors.ToHTTPError(errors.Unauthorized("User not authenticated"))
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User

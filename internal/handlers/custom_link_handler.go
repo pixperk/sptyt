@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
+	"github.com/pixperk/sptyt/internal/database"
 	"github.com/pixperk/sptyt/internal/genius"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
@@ -53,7 +54,8 @@ func (h *CustomLinkHandler) CreateCustomLink(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user
 	var user models.User
@@ -116,7 +118,8 @@ func (h *CustomLinkHandler) GetUserLinks(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err := h.db.NewSelect().
@@ -162,7 +165,8 @@ func (h *CustomLinkHandler) GetCustomLink(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -193,7 +197,8 @@ func (h *CustomLinkHandler) UpdateCustomLink(c echo.Context) error {
 		return errors.ToHTTPError(errors.Validation("Invalid link ID"))
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -229,7 +234,8 @@ func (h *CustomLinkHandler) DeleteCustomLink(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -260,7 +266,8 @@ func (h *CustomLinkHandler) AddElement(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -315,7 +322,8 @@ func (h *CustomLinkHandler) UpdateElement(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid element ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -351,7 +359,8 @@ func (h *CustomLinkHandler) BatchUpdateElements(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -393,7 +402,8 @@ func (h *CustomLinkHandler) ReorderElements(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -434,7 +444,8 @@ func (h *CustomLinkHandler) DeleteElement(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid element ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -456,7 +467,8 @@ func (h *CustomLinkHandler) DeleteElement(c echo.Context) error {
 // GetLinkBySlugPublic returns a custom link by slug (public access, for API calls)
 func (h *CustomLinkHandler) GetLinkBySlugPublic(c echo.Context) error {
 	slug := c.Param("slug")
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	link, err := h.service.GetLinkBySlug(ctx, slug)
 	if err != nil {
@@ -499,7 +511,8 @@ func (h *CustomLinkHandler) TrackElementClick(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid element ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get the element to retrieve the target URL
 	var element models.LinkElement
@@ -554,7 +567,8 @@ func (h *CustomLinkHandler) GetLinkAnalytics(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	var user models.User
 	err = h.db.NewSelect().
@@ -584,7 +598,8 @@ func (h *CustomLinkHandler) VerifyLinkPassword(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	isValid, err := h.service.VerifyPassword(ctx, slug, req.Password)
 	if err != nil {
@@ -610,7 +625,8 @@ func (h *CustomLinkHandler) GetSongElementData(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "spotify_url is required")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Extract Spotify track ID from URL
 	trackID := extractSpotifyTrackID(spotifyURL)
@@ -702,7 +718,8 @@ func (h *CustomLinkHandler) GetConversionSongs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid conversion ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user
 	var user models.User
@@ -745,7 +762,8 @@ func (h *CustomLinkHandler) GetConversionSongsPublic(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid conversion ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get conversion
 	var conversion models.PlaylistConversion

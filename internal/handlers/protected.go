@@ -1,11 +1,12 @@
 package handlers
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/pixperk/sptyt/internal/database"
 
 	"github.com/clerk/clerk-sdk-go/v2/user"
 	dodopayments "github.com/dodopayments/dodopayments-go"
@@ -36,7 +37,8 @@ func (ph *ProtectedHandler) GetOrCreateUser(c echo.Context) (*models.User, error
 		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unable to get user ID")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 	var dbUser models.User
 
 	// Try to find existing user
@@ -192,7 +194,8 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 
 	client := dodopayments.NewClient(clientOptions...)
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Determine allowed payment methods based on request
 	allowedPaymentMethods := []dodopayments.PaymentMethodTypes{
@@ -262,7 +265,8 @@ func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
 	// TODO: Call DodoPay API to cancel subscription
 	// For now, just mark as cancelled in database
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 	_, err = ph.db.NewUpdate().
 		Model(user).
 		Set("subscription_status = ?", "cancelled").
@@ -285,7 +289,7 @@ func (ph *ProtectedHandler) CancelSubscription(c echo.Context) error {
 func (ph *ProtectedHandler) PaymentReturn(c echo.Context) error {
 	// Get query parameters from the redirect
 	sessionID := c.QueryParam("session_id")
-	status := c.QueryParam("status")                   // From DodoPay redirect (e.g., "active")
+	status := c.QueryParam("status")                  // From DodoPay redirect (e.g., "active")
 	subscriptionID := c.QueryParam("subscription_id") // From DodoPay redirect
 
 	log.Printf("PaymentReturn: session_id=%s, status=%s, subscription_id=%s",
@@ -298,7 +302,8 @@ func (ph *ProtectedHandler) PaymentReturn(c echo.Context) error {
 	}
 
 	// Fetch the latest user data from database to check if webhook updated it
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 	var freshUser models.User
 	err = ph.db.NewSelect().
 		Model(&freshUser).
@@ -326,16 +331,16 @@ func (ph *ProtectedHandler) PaymentReturn(c echo.Context) error {
 		freshUser.ID, paymentStatus, freshUser.SubscriptionStatus, freshUser.SubscriptionTier)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  paymentStatus,
-		"message": message,
-		"session_id": sessionID,
+		"status":          paymentStatus,
+		"message":         message,
+		"session_id":      sessionID,
 		"subscription_id": subscriptionID,
 		"user": map[string]interface{}{
-			"email":               freshUser.Email,
-			"subscription_tier":   freshUser.SubscriptionTier,
-			"subscription_status": freshUser.SubscriptionStatus,
+			"email":                freshUser.Email,
+			"subscription_tier":    freshUser.SubscriptionTier,
+			"subscription_status":  freshUser.SubscriptionStatus,
 			"subscription_ends_at": freshUser.SubscriptionEndsAt,
-			"is_premium":          freshUser.IsPremium(),
+			"is_premium":           freshUser.IsPremium(),
 		},
 	})
 }

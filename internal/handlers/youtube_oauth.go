@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/pixperk/sptyt/internal/database"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -67,7 +68,8 @@ func (h *YouTubeOAuthHandler) Authorize(c echo.Context) error {
 
 	// Store state in Redis with 10 minute expiry
 	cacheKey := fmt.Sprintf("oauth_state:%s", state)
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 	if err := h.cache.Set(ctx, cacheKey, clerkUserID, 10*time.Minute); err != nil {
 		log.Printf("Failed to store state in cache: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to store state")
@@ -122,7 +124,8 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	}
 
 	// Verify state and get user ID from Redis
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 	cacheKey := fmt.Sprintf("oauth_state:%s", state)
 	clerkUserID, err := h.cache.Get(ctx, cacheKey)
 	if err != nil {
@@ -255,7 +258,8 @@ func (h *YouTubeOAuthHandler) GetYouTubeAuthStatus(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
@@ -317,7 +321,8 @@ func (h *YouTubeOAuthHandler) DisconnectYouTube(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
 
 	// Get user from database
 	var user models.User
