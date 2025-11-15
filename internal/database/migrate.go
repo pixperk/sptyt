@@ -230,5 +230,16 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Dropped layout_type column from custom_links table (moved to simple grid)")
 	}
 
+	// Add profile_image column to custom_links
+	_, err = db.Exec(`
+		ALTER TABLE custom_links
+		ADD COLUMN IF NOT EXISTS profile_image TEXT;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add profile_image column: %v", err)
+	} else {
+		log.Println("Added profile_image column to custom_links table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }

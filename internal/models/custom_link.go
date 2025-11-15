@@ -16,6 +16,7 @@ type CustomLink struct {
 	Slug                string     `bun:",unique,notnull" json:"slug"`                          // URL-safe identifier
 	Title               string     `bun:",notnull" json:"title"`
 	Description         string     `bun:"" json:"description,omitempty"`
+	ProfileImage        string     `bun:"" json:"profile_image,omitempty"`                      // Cloudinary URL for profile image
 	Theme               string     `bun:",notnull,default:'auto'" json:"theme"`                 // light, dark, auto
 	IsPasswordProtected bool       `bun:",notnull,default:false" json:"is_password_protected"`
 	PasswordHash        string     `bun:"" json:"-"`                                            // Never expose in JSON

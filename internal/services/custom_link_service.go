@@ -77,6 +77,7 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 		Slug:                slug,
 		Title:               req.Title,
 		Description:         req.Description,
+		ProfileImage:        req.ProfileImage,
 		Theme:               req.Theme,
 		IsPasswordProtected: req.Password != "",
 		PasswordHash:        passwordHash,
@@ -183,6 +184,9 @@ func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID
 	}
 	if req.Description != nil {
 		update = update.Set("description = ?", *req.Description)
+	}
+	if req.ProfileImage != nil {
+		update = update.Set("profile_image = ?", *req.ProfileImage)
 	}
 	if req.Theme != nil {
 		update = update.Set("theme = ?", *req.Theme)
@@ -633,7 +637,8 @@ func (s *CustomLinkService) generateUniqueSlug(ctx context.Context, title string
 type CreateLinkRequest struct {
 	Title        string     `json:"title" validate:"required"`
 	Description  string     `json:"description"`
-	CustomSlug   string     `json:"custom_slug"` // Premium only
+	ProfileImage string     `json:"profile_image"` // Cloudinary URL
+	CustomSlug   string     `json:"custom_slug"`   // Premium only
 	Theme        string     `json:"theme"`
 	Password     string     `json:"password"`      // Premium only
 	ConversionID *uuid.UUID `json:"conversion_id"`
@@ -642,10 +647,11 @@ type CreateLinkRequest struct {
 }
 
 type UpdateLinkRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Theme       *string `json:"theme"`
-	IsPublic    *bool   `json:"is_public"`
+	Title        *string `json:"title"`
+	Description  *string `json:"description"`
+	ProfileImage *string `json:"profile_image"` // Cloudinary URL
+	Theme        *string `json:"theme"`
+	IsPublic     *bool   `json:"is_public"`
 }
 
 type AddElementRequest struct {
