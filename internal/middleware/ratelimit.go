@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -49,6 +50,13 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 
 			current, err := rl.client.Incr(ctx, key).Result()
 			if err != nil {
+				// CRITICAL: Redis is down - rate limiting is bypassed!
+				// Log the error and alert, but allow request to proceed
+				log.Printf("CRITICAL: Rate limiter Redis error (bypassing rate limit): %v", err)
+				// In production, you should also:
+				// - Send alert to monitoring system
+				// - Increment a metric counter
+				// - Consider returning error instead if you want fail-closed behavior
 				return next(c)
 			}
 

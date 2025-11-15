@@ -20,6 +20,7 @@ type Client struct {
 	tokenExpiry  time.Time
 	mu           sync.RWMutex
 	httpClient   *http.Client
+	stopChan     chan struct{} // Channel to stop the refresh loop
 }
 
 type tokenResponse struct {
@@ -113,6 +114,7 @@ func NewClient(clientID, clientSecret string) *Client {
 			Timeout:   10 * time.Second,
 			Transport: transport,
 		},
+		stopChan: make(chan struct{}),
 	}
 
 	go client.refreshTokenLoop()
@@ -127,9 +129,19 @@ func (c *Client) refreshTokenLoop() {
 	ticker := time.NewTicker(55 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		c.authenticate(ctx)
+	for {
+		select {
+		case <-ticker.C:
+			c.authenticate(ctx)
+		case <-c.stopChan:
+			return
+		}
 	}
+}
+
+// Close stops the token refresh loop and prevents goroutine leak
+func (c *Client) Close() {
+	close(c.stopChan)
 }
 
 func (c *Client) authenticate(ctx context.Context) error {
