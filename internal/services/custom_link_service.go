@@ -429,7 +429,7 @@ func (s *CustomLinkService) VerifyPassword(ctx context.Context, slug, password s
 	var link models.CustomLink
 	err := s.db.NewSelect().
 		Model(&link).
-		Column("password_hash").
+		Column("password_hash", "is_password_protected").
 		Where("slug = ?", slug).
 		Scan(ctx)
 	if err != nil {
