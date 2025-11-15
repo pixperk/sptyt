@@ -10,6 +10,7 @@ import (
 	"github.com/pixperk/sptyt/internal/auth"
 	"github.com/pixperk/sptyt/internal/cache"
 	"github.com/pixperk/sptyt/internal/models"
+	"github.com/pixperk/sptyt/pkg/errors"
 	"github.com/uptrace/bun"
 )
 
@@ -49,7 +50,7 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 			// Get authenticated user
 			clerkUserID, ok := auth.GetClerkUserID(c)
 			if !ok {
-				return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+				return errors.ToHTTPError(errors.Unauthorized("User not authenticated"))
 			}
 
 			ctx := context.Background()
@@ -63,7 +64,7 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 
 			if err != nil {
 				log.Printf("PlaylistLimiter: Failed to get user: %v", err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+				return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to get user"))
 			}
 
 			// Determine limits based on subscription tier
@@ -78,18 +79,18 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 			count, err := pl.getMonthlyConversionCount(ctx, user.ID)
 			if err != nil {
 				log.Printf("PlaylistLimiter: Failed to get conversion count: %v", err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check limits")
+				return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to check limits"))
 			}
 
 			if count >= limits.MaxPlaylistsPerMonth {
-				return echo.NewHTTPError(http.StatusTooManyRequests, map[string]interface{}{
-					"error":                     "Monthly conversion limit reached",
-					"limit":                     limits.MaxPlaylistsPerMonth,
-					"current_count":             count,
-					"max_songs_per_playlist":    limits.MaxSongsPerPlaylist,
-					"upgrade_required":          !user.IsPremium(),
-					"subscription_tier":         user.SubscriptionTier,
-				})
+				return errors.ToHTTPError(
+					errors.QuotaExceeded("Monthly conversion limit reached").
+						WithMeta("limit", limits.MaxPlaylistsPerMonth).
+						WithMeta("current_count", count).
+						WithMeta("max_songs_per_playlist", limits.MaxSongsPerPlaylist).
+						WithMeta("upgrade_required", !user.IsPremium()).
+						WithMeta("subscription_tier", user.SubscriptionTier),
+				)
 			}
 
 			// Store limits in context for handler to use
@@ -146,14 +147,14 @@ func ValidatePlaylistSize(c echo.Context, trackCount int) error {
 		user, _ := c.Get("current_user").(*models.User)
 		isPremium := user != nil && user.IsPremium()
 
-		return echo.NewHTTPError(http.StatusBadRequest, map[string]interface{}{
-			"error":                  "Playlist exceeds maximum track limit",
-			"track_count":            trackCount,
-			"max_tracks_allowed":     limits.MaxSongsPerPlaylist,
-			"upgrade_required":       !isPremium,
-			"premium_max_tracks":     PremiumTierLimits.MaxSongsPerPlaylist,
-			"subscription_tier":      user.SubscriptionTier,
-		})
+		return errors.ToHTTPError(
+			errors.New(errors.ErrCodeExceedsLimit, "Playlist exceeds maximum track limit").
+				WithMeta("track_count", trackCount).
+				WithMeta("max_tracks_allowed", limits.MaxSongsPerPlaylist).
+				WithMeta("upgrade_required", !isPremium).
+				WithMeta("premium_max_tracks", PremiumTierLimits.MaxSongsPerPlaylist).
+				WithMeta("subscription_tier", user.SubscriptionTier),
+		)
 	}
 
 	return nil
@@ -164,7 +165,7 @@ func (pl *PlaylistLimiter) GetUserLimitsInfo(c echo.Context) error {
 	// Get authenticated user
 	clerkUserID, ok := auth.GetClerkUserID(c)
 	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+		return errors.ToHTTPError(errors.Unauthorized("User not authenticated"))
 	}
 
 	ctx := context.Background()
@@ -177,7 +178,7 @@ func (pl *PlaylistLimiter) GetUserLimitsInfo(c echo.Context) error {
 		Scan(ctx)
 
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+		return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to get user"))
 	}
 
 	// Determine limits

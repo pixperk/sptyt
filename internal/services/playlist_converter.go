@@ -13,6 +13,7 @@ import (
 	"github.com/pixperk/sptyt/internal/spotify"
 	ws "github.com/pixperk/sptyt/internal/websocket"
 	"github.com/pixperk/sptyt/internal/youtube"
+	"github.com/pixperk/sptyt/pkg/errors"
 	"github.com/uptrace/bun"
 )
 
@@ -63,10 +64,18 @@ type TrackMatchResult struct {
 }
 
 // isYouTubeAPIError checks if an error is a YouTube API error that shouldn't count against quota
+// Now uses typed errors instead of string matching
 func isYouTubeAPIError(err error) bool {
 	if err == nil {
 		return false
 	}
+
+	// Check if it's a typed YouTube API error
+	if errors.IsYouTubeAPIError(err) {
+		return true
+	}
+
+	// Fallback to string matching for legacy errors
 	errStr := strings.ToLower(err.Error())
 	return strings.Contains(errStr, "401") ||
 		strings.Contains(errStr, "403") ||

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pixperk/sptyt/internal/models"
+	"github.com/pixperk/sptyt/pkg/errors"
 	"github.com/pixperk/sptyt/pkg/utils"
 	"github.com/uptrace/bun"
 	"golang.org/x/crypto/bcrypt"
@@ -24,13 +25,13 @@ func NewCustomLinkService(db *bun.DB) *CustomLinkService {
 func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UUID, req CreateLinkRequest) (*models.CustomLink, error) {
 	// Validate input lengths
 	if len(req.Title) > 200 {
-		return nil, fmt.Errorf("title too long (max 200 characters)")
+		return nil, errors.Validation("title too long (max 200 characters)")
 	}
 	if len(req.Description) > 1000 {
-		return nil, fmt.Errorf("description too long (max 1000 characters)")
+		return nil, errors.Validation("description too long (max 1000 characters)")
 	}
 	if len(req.CustomSlug) > 100 {
-		return nil, fmt.Errorf("custom slug too long (max 100 characters)")
+		return nil, errors.Validation("custom slug too long (max 100 characters)")
 	}
 
 	// Generate slug
@@ -42,10 +43,10 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 		// Check if slug already exists
 		exists, err := s.slugExists(ctx, slug)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, errors.ErrCodeDatabase, "failed to check slug availability")
 		}
 		if exists {
-			return nil, fmt.Errorf("slug '%s' is already taken", slug)
+			return nil, errors.New(errors.ErrCodeAlreadyExists, fmt.Sprintf("slug '%s' is already taken", slug))
 		}
 	} else {
 		// Generate random slug for free users or if not specified
@@ -63,11 +64,11 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 	var passwordHash string
 	if req.Password != "" {
 		if !req.IsPremium {
-			return nil, fmt.Errorf("password protection is a premium feature")
+			return nil, errors.PremiumRequired("Password protection")
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
-			return nil, fmt.Errorf("failed to hash password: %w", err)
+			return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to hash password")
 		}
 		passwordHash = string(hash)
 	}
@@ -90,7 +91,7 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 
 	_, err := s.db.NewInsert().Model(link).Exec(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create custom link: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeDatabase, "failed to create custom link")
 	}
 
 	return link, nil
@@ -168,10 +169,10 @@ func (s *CustomLinkService) GetLinkByID(ctx context.Context, linkID, userID uuid
 func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID uuid.UUID, req UpdateLinkRequest) error {
 	// Validate input lengths
 	if req.Title != nil && len(*req.Title) > 200 {
-		return fmt.Errorf("title too long (max 200 characters)")
+		return errors.Validation("title too long (max 200 characters)")
 	}
 	if req.Description != nil && len(*req.Description) > 1000 {
-		return fmt.Errorf("description too long (max 1000 characters)")
+		return errors.Validation("description too long (max 1000 characters)")
 	}
 
 	update := s.db.NewUpdate().
@@ -197,12 +198,12 @@ func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID
 
 	result, err := update.Exec(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, errors.ErrCodeDatabase, "failed to update custom link")
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("custom link not found")
+		return errors.NotFound("Custom link")
 	}
 
 	return nil

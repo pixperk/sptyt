@@ -12,11 +12,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
+	"github.com/pixperk/sptyt/internal/genius"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
 	"github.com/pixperk/sptyt/internal/spotify"
 	"github.com/pixperk/sptyt/internal/youtube"
-	"github.com/pixperk/sptyt/internal/genius"
+	"github.com/pixperk/sptyt/pkg/errors"
 	"github.com/uptrace/bun"
 )
 
@@ -184,12 +185,12 @@ func (h *CustomLinkHandler) GetCustomLink(c echo.Context) error {
 func (h *CustomLinkHandler) UpdateCustomLink(c echo.Context) error {
 	clerkUserID, ok := auth.GetClerkUserID(c)
 	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+		return errors.ToHTTPError(errors.Unauthorized("User not authenticated"))
 	}
 
 	linkID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid link ID")
+		return errors.ToHTTPError(errors.Validation("Invalid link ID"))
 	}
 
 	ctx := context.Background()
@@ -200,17 +201,17 @@ func (h *CustomLinkHandler) UpdateCustomLink(c echo.Context) error {
 		Where("clerk_id = ?", clerkUserID).
 		Scan(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+		return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to get user"))
 	}
 
 	var req services.UpdateLinkRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		return errors.ToHTTPError(errors.Validation("Invalid request body"))
 	}
 
 	err = h.service.UpdateCustomLink(ctx, linkID, user.ID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return errors.ToHTTPError(err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Link updated successfully"})

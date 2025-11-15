@@ -1,10 +1,9 @@
 package middleware
 
 import (
-	"net/http"
-
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/models"
+	"github.com/pixperk/sptyt/pkg/errors"
 )
 
 // RequirePremium is middleware that checks if user has active premium subscription
@@ -14,21 +13,21 @@ func RequirePremium() echo.MiddlewareFunc {
 			// Get user from context (set by GetOrCreateUser)
 			userInterface := c.Get("current_user")
 			if userInterface == nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "User not found")
+				return errors.ToHTTPError(errors.Unauthorized("User not found"))
 			}
 
 			user, ok := userInterface.(*models.User)
 			if !ok {
-				return echo.NewHTTPError(http.StatusInternalServerError, "Invalid user data")
+				return errors.ToHTTPError(errors.Internal("Invalid user data"))
 			}
 
 			// Check if user has premium subscription
 			if !user.IsPremium() {
-				return c.JSON(http.StatusForbidden, map[string]interface{}{
-					"error":   "Premium subscription required",
-					"message": "This feature is only available for premium users. Upgrade to access playlist conversion, batch operations, and more!",
-					"upgrade_url": "/upgrade",
-				})
+				return errors.ToHTTPError(
+					errors.PremiumRequired("This feature").
+						WithDetails("This feature is only available for premium users. Upgrade to access playlist conversion, batch operations, and more!").
+						WithMeta("upgrade_url", "/upgrade"),
+				)
 			}
 
 			return next(c)
