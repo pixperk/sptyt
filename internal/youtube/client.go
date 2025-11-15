@@ -11,8 +11,9 @@ import (
 )
 
 type Client struct {
-	apiKey     string
-	httpClient *http.Client
+	apiKey       string
+	httpClient   *http.Client
+	quotaTracker *QuotaTracker
 }
 
 type searchResponse struct {
@@ -66,10 +67,23 @@ func NewClient(apiKey string) *Client {
 			Timeout:   10 * time.Second,
 			Transport: transport,
 		},
+		quotaTracker: nil, // Will be set via SetQuotaTracker if needed
 	}
 }
 
+// SetQuotaTracker sets the quota tracker for this client
+func (c *Client) SetQuotaTracker(tracker *QuotaTracker) {
+	c.quotaTracker = tracker
+}
+
 func (c *Client) SearchOfficialMV(ctx context.Context, trackName string, artist string) (string, error) {
+	// Check and consume quota before making API call
+	if c.quotaTracker != nil {
+		if err := c.quotaTracker.ConsumeQuota(ctx, QuotaCostSearch); err != nil {
+			return "", err
+		}
+	}
+
 	query := fmt.Sprintf("%s %s official music video", trackName, artist)
 
 	params := url.Values{}
@@ -112,6 +126,13 @@ func (c *Client) SearchOfficialMV(ctx context.Context, trackName string, artist 
 }
 
 func (c *Client) SearchLyricVideo(ctx context.Context, trackName string, artist string) (string, error) {
+	// Check and consume quota before making API call
+	if c.quotaTracker != nil {
+		if err := c.quotaTracker.ConsumeQuota(ctx, QuotaCostSearch); err != nil {
+			return "", err
+		}
+	}
+
 	query := fmt.Sprintf("%s %s lyrics", trackName, artist)
 
 	params := url.Values{}
