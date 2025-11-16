@@ -1,0 +1,102 @@
+services:
+  # PostgreSQL test database
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: sptyt-test-db
+    environment:
+      POSTGRES_DB: sptyt_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sptyt-test-network
+
+  # Redis test instance
+  redis-test:
+    image: redis:7-alpine
+    container_name: sptyt-test-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-test-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sptyt-test-network
+
+  # Optional: Test runner container
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: sptyt-test-runner
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    environment:
+      # Database configuration
+      TEST_DB_HOST: postgres-test
+      TEST_DB_PORT: 5432
+      TEST_DB_USER: postgres
+      TEST_DB_PASSWORD: postgres
+      TEST_DB_NAME: sptyt_test
+
+      # Redis configuration
+      REDIS_URL: redis://redis-test:6379
+
+      # Webhook testing
+      DODOPAY_WEBHOOK_SECRET: test_webhook_secret_12345
+
+      # OAuth (test credentials)
+      YOUTUBE_OAUTH_CLIENT_ID: test_youtube_client_id
+      YOUTUBE_OAUTH_CLIENT_SECRET: test_youtube_client_secret
+
+      # Clerk (test)
+      CLERK_SECRET_KEY: test_clerk_secret_key
+
+      # Spotify (test)
+      SPOTIFY_CLIENT_ID: test_spotify_client_id
+      SPOTIFY_CLIENT_SECRET: test_spotify_client_secret
+
+      # Test mode
+      GO_ENV: test
+    volumes:
+      - .:/app
+      - go-test-cache:/go/pkg
+    working_dir: /app
+    networks:
+      - sptyt-test-network
+    # Command to run tests
+    command: >
+      sh -c "
+        echo 'Waiting for services to be ready...' &&
+        sleep 5 &&
+        echo 'Running tests...' &&
+        go test ./... -v -race -coverprofile=coverage.out &&
+        go tool cover -func=coverage.out
+      "
+
+volumes:
+  postgres-test-data:
+    driver: local
+  redis-test-data:
+    driver: local
+  go-test-cache:
+    driver: local
+
+networks:
+  sptyt-test-network:
+    driver: bridge
