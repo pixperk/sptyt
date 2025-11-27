@@ -25,8 +25,8 @@ func NewRedisCache(connString string) (*RedisCache, error) {
 	var client *redis.Client
 
 	if opt, err := redis.ParseURL(connString); err == nil {
-		opt.PoolSize = 50
-		opt.MinIdleConns = 10
+		opt.PoolSize = 20          // Reduced from 50 - sufficient for most workloads
+		opt.MinIdleConns = 2       // Reduced from 10 - fewer keep-alive pings
 		opt.MaxRetries = 3
 		opt.DialTimeout = 5 * time.Second
 		opt.ReadTimeout = 3 * time.Second
@@ -35,8 +35,8 @@ func NewRedisCache(connString string) (*RedisCache, error) {
 	} else {
 		client = redis.NewClient(&redis.Options{
 			Addr:         connString,
-			PoolSize:     50,
-			MinIdleConns: 10,
+			PoolSize:     20,        // Reduced from 50
+			MinIdleConns: 2,         // Reduced from 10
 			MaxRetries:   3,
 			DialTimeout:  5 * time.Second,
 			ReadTimeout:  3 * time.Second,

@@ -3,6 +3,7 @@ package tasks
 import (
 	"crypto/tls"
 	"log"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/pixperk/sptyt/internal/services"
@@ -38,6 +39,10 @@ func NewServer(redisAddr, redisPassword string, converterService *services.Playl
 				"default":  3,
 				"low":      1,
 			},
+			// Reduce Redis polling frequency to minimize commands
+			HealthCheckInterval:      30 * time.Second, // Default: 15s - check worker health less frequently
+			DelayedTaskCheckInterval: 30 * time.Second, // Default: 5s - check scheduled tasks less frequently
+			StrictPriority:           true,             // Process higher priority queues first (more efficient)
 		},
 	)
 
