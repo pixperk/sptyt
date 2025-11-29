@@ -195,8 +195,8 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 		YouTubePlaylistURL: conversion.YouTubePlaylistURL,
 	})
 
-	// Match tracks concurrently using worker pool
-	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job.UseLyricVideos, job.ClerkUserID, conversion.ID.String())
+	// Match tracks concurrently using worker pool (uses user's YouTube quota via OAuth token)
+	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job.UseLyricVideos, job.ClerkUserID, conversion.ID.String(), job.YouTubeAccessToken)
 
 	// Add matched videos to YouTube playlist
 	var conversionLogs []models.TrackConversionLog
@@ -299,7 +299,7 @@ type JobWithIndex struct {
 }
 
 // matchTracksWithWorkerPool uses a worker pool to match tracks concurrently
-func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context, tracks []*spotify.PlaylistTrack, useLyricVideos bool, userID string, conversionID string) []TrackMatchResult {
+func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context, tracks []*spotify.PlaylistTrack, useLyricVideos bool, userID string, conversionID string, accessToken string) []TrackMatchResult {
 	// Create channels
 	jobsChan := make(chan JobWithIndex, len(tracks))
 	resultsChan := make(chan TrackMatchResult, len(tracks))
@@ -312,7 +312,7 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 	var wg sync.WaitGroup
 	for i := 0; i < s.workerCount; i++ {
 		wg.Add(1)
-		go s.trackMatchWorker(ctx, i, jobsChan, resultsChan, useLyricVideos, &wg)
+		go s.trackMatchWorker(ctx, i, jobsChan, resultsChan, useLyricVideos, accessToken, &wg)
 	}
 
 	// Send jobs to workers with their original indices
@@ -365,7 +365,7 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 }
 
 // trackMatchWorker is a worker goroutine that matches tracks to YouTube videos
-func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerID int, jobs <-chan JobWithIndex, results chan<- TrackMatchResult, useLyricVideos bool, wg *sync.WaitGroup) {
+func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerID int, jobs <-chan JobWithIndex, results chan<- TrackMatchResult, useLyricVideos bool, accessToken string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for job := range jobs {
@@ -378,7 +378,7 @@ func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerI
 			}
 			return
 		default:
-			result := s.matchTrackToYouTube(ctx, job.Track, useLyricVideos)
+			result := s.matchTrackToYouTube(ctx, job.Track, useLyricVideos, accessToken)
 			result.Index = job.Index // Preserve the original index
 			results <- result
 		}
@@ -386,7 +386,8 @@ func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerI
 }
 
 // matchTrackToYouTube matches a single Spotify track to a YouTube video
-func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, track *spotify.PlaylistTrack, useLyricVideos bool) TrackMatchResult {
+// Uses user's OAuth token for searches (uses user's YouTube quota, not server's)
+func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, track *spotify.PlaylistTrack, useLyricVideos bool, accessToken string) TrackMatchResult {
 	result := TrackMatchResult{
 		Track: track,
 	}
@@ -397,9 +398,9 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 	var videoURL string
 	var err error
 
-	// Strategy 1: Official Music Video
+	// Strategy 1: Official Music Video (using user's quota via OAuth token)
 	if !useLyricVideos {
-		videoURL, err = s.youtubeClient.SearchOfficialMV(ctx, track.Name, artistsStr)
+		videoURL, err = s.youtubeClient.SearchOfficialMVWithToken(ctx, accessToken, track.Name, artistsStr)
 		if err == nil && videoURL != "" {
 			result.YouTubeURL = videoURL
 			result.VideoID = extractVideoID(videoURL)
@@ -408,8 +409,8 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 		}
 	}
 
-	// Strategy 2: Lyric Video
-	videoURL, err = s.youtubeClient.SearchLyricVideo(ctx, track.Name, artistsStr)
+	// Strategy 2: Lyric Video (using user's quota via OAuth token)
+	videoURL, err = s.youtubeClient.SearchLyricVideoWithToken(ctx, accessToken, track.Name, artistsStr)
 	if err == nil && videoURL != "" {
 		result.YouTubeURL = videoURL
 		result.VideoID = extractVideoID(videoURL)
