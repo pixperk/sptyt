@@ -1,11 +1,11 @@
 package tasks
 
 import (
-	"crypto/tls"
 	"log"
 	"time"
 
 	"github.com/hibiken/asynq"
+	"github.com/pixperk/sptyt/internal/config"
 	"github.com/pixperk/sptyt/internal/services"
 )
 
@@ -16,19 +16,9 @@ type Server struct {
 	processor *PlaylistConversionProcessor
 }
 
-// NewServer creates a new task server
-func NewServer(redisAddr, redisPassword string, converterService *services.PlaylistConverterService, concurrency int) *Server {
-	redisOpt := asynq.RedisClientOpt{
-		Addr: redisAddr,
-	}
-	if redisPassword != "" {
-		redisOpt.Username = "default" // Upstash requires username
-		redisOpt.Password = redisPassword
-		// Enable TLS for Upstash (or any production Redis with TLS)
-		redisOpt.TLSConfig = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
-	}
+// NewServer creates a new task server from Redis config
+func NewServer(cfg *config.RedisConfig, converterService *services.PlaylistConverterService, concurrency int) *Server {
+	redisOpt := cfg.NewAsynqRedisOpt()
 
 	server := asynq.NewServer(
 		redisOpt,

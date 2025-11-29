@@ -1,9 +1,8 @@
 package tasks
 
 import (
-	"crypto/tls"
-
 	"github.com/hibiken/asynq"
+	"github.com/pixperk/sptyt/internal/config"
 )
 
 // Client wraps Asynq client for enqueuing tasks
@@ -11,20 +10,9 @@ type Client struct {
 	client *asynq.Client
 }
 
-// NewClient creates a new task client
-func NewClient(redisAddr, redisPassword string) *Client {
-	redisOpt := asynq.RedisClientOpt{
-		Addr: redisAddr,
-	}
-	if redisPassword != "" {
-		redisOpt.Username = "default" // Upstash requires username
-		redisOpt.Password = redisPassword
-		// Enable TLS for Upstash (or any production Redis with TLS)
-		redisOpt.TLSConfig = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
-	}
-
+// NewClient creates a new task client from Redis config
+func NewClient(cfg *config.RedisConfig) *Client {
+	redisOpt := cfg.NewAsynqRedisOpt()
 	client := asynq.NewClient(redisOpt)
 	return &Client{
 		client: client,

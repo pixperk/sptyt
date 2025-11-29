@@ -54,8 +54,11 @@ services:
       TEST_DB_PASSWORD: postgres
       TEST_DB_NAME: sptyt_test
 
-      # Redis configuration
-      REDIS_URL: redis://redis-test:6379
+      # Redis configuration (unified)
+      REDIS_ADDR: redis-test:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: "0"
+      REDIS_TLS: "false"
 
       # Webhook testing
       DODOPAY_WEBHOOK_SECRET: test_webhook_secret_12345

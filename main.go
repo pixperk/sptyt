@@ -39,9 +39,6 @@ func main() {
 	spotifyClientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
 	youtubeAPIKey := os.Getenv("YOUTUBE_API_KEY")
 	geniusAccessToken := os.Getenv("GENIUS_ACCESS_TOKEN")
-	redisURL := os.Getenv("REDIS_URL")
-	asynqRedisAddr := os.Getenv("ASYNQ_REDIS_ADDR")
-	asynqRedisPassword := os.Getenv("ASYNQ_REDIS_PASSWORD")
 	rateLimitStr := os.Getenv("RATE_LIMIT_PER_MINUTE")
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS") // Comma-separated list of allowed origins
 
@@ -49,13 +46,9 @@ func main() {
 		log.Fatal("Missing required environment variables")
 	}
 
-	if redisURL == "" {
-		redisURL = "redis://localhost:6379"
-	}
-
-	if asynqRedisAddr == "" {
-		asynqRedisAddr = "localhost:6379"
-	}
+	// Load unified Redis configuration
+	redisConfig := config.LoadRedisConfig()
+	log.Printf("Redis config: %s", redisConfig.String())
 
 	rateLimit := 200 // Increased from 60 to 200 requests per minute
 	if rateLimitStr != "" {
@@ -68,19 +61,14 @@ func main() {
 	var redisCache *cache.RedisCache
 	var rateLimiter *custommw.RateLimiter
 
-	if redisURL != "" {
-		var err error
-		redisCache, err = cache.NewRedisCache(redisURL)
-		if err != nil {
-			log.Printf("WARNING: Failed to connect to Redis: %v", err)
-			log.Println("Running without Redis - rate limiting and caching disabled")
-		} else {
-			defer redisCache.Close()
-			rateLimiter = custommw.NewRateLimiter(redisCache.GetClient(), rateLimit)
-			log.Println("Redis connected successfully")
-		}
+	redisCache, err := cache.NewRedisCache(redisConfig)
+	if err != nil {
+		log.Printf("WARNING: Failed to connect to Redis: %v", err)
+		log.Println("Running without Redis - rate limiting and caching disabled")
 	} else {
-		log.Println("No Redis URL provided - running without Redis")
+		defer redisCache.Close()
+		rateLimiter = custommw.NewRateLimiter(redisCache.GetClient(), rateLimit)
+		log.Println("Redis connected successfully")
 	}
 
 	spotifyClient := spotify.NewClient(spotifyClientID, spotifyClientSecret)
@@ -93,7 +81,7 @@ func main() {
 	go wsHub.Run()
 
 	// Initialize Asynq task client
-	taskClient := tasks.NewClient(asynqRedisAddr, asynqRedisPassword)
+	taskClient := tasks.NewClient(redisConfig)
 	defer taskClient.Close()
 
 	// Initialize playlist conversion service with WebSocket hub and task client
@@ -101,7 +89,7 @@ func main() {
 
 	// Start Asynq task server in background
 	// Reduced from 10 to 5 workers to minimize Redis polling commands
-	taskServer := tasks.NewServer(asynqRedisAddr, asynqRedisPassword, converterService, 5)
+	taskServer := tasks.NewServer(redisConfig, converterService, 5)
 	go func() {
 		if err := taskServer.Start(); err != nil {
 			log.Fatalf("Asynq server failed: %v", err)

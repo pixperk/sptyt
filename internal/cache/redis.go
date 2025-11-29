@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/pixperk/sptyt/internal/config"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -21,28 +22,10 @@ type CachedRedirect struct {
 	URL string `json:"url"`
 }
 
-func NewRedisCache(connString string) (*RedisCache, error) {
-	var client *redis.Client
-
-	if opt, err := redis.ParseURL(connString); err == nil {
-		opt.PoolSize = 20          // Reduced from 50 - sufficient for most workloads
-		opt.MinIdleConns = 2       // Reduced from 10 - fewer keep-alive pings
-		opt.MaxRetries = 3
-		opt.DialTimeout = 5 * time.Second
-		opt.ReadTimeout = 3 * time.Second
-		opt.WriteTimeout = 3 * time.Second
-		client = redis.NewClient(opt)
-	} else {
-		client = redis.NewClient(&redis.Options{
-			Addr:         connString,
-			PoolSize:     20,        // Reduced from 50
-			MinIdleConns: 2,         // Reduced from 10
-			MaxRetries:   3,
-			DialTimeout:  5 * time.Second,
-			ReadTimeout:  3 * time.Second,
-			WriteTimeout: 3 * time.Second,
-		})
-	}
+// NewRedisCache creates a new Redis cache from config
+func NewRedisCache(cfg *config.RedisConfig) (*RedisCache, error) {
+	opts := cfg.NewRedisClient()
+	client := redis.NewClient(opts)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
