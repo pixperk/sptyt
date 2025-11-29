@@ -514,13 +514,14 @@ func (s *PlaylistConverterService) GetConversion(ctx context.Context, id uuid.UU
 	return &conversion, nil
 }
 
-// GetUserConversions fetches all conversions for a user
+// GetUserConversions fetches all conversions for a user (excludes soft-deleted)
 func (s *PlaylistConverterService) GetUserConversions(ctx context.Context, userID uuid.UUID, limit int) ([]*models.PlaylistConversion, error) {
 	var conversions []*models.PlaylistConversion
 
 	query := s.db.NewSelect().
 		Model(&conversions).
 		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL"). // Exclude soft-deleted
 		Order("created_at DESC")
 
 	if limit > 0 {

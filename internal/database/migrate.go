@@ -254,5 +254,25 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Added YouTube quota tracking columns to user_analytics table")
 	}
 
+	// Add soft delete column to playlist_conversions
+	_, err = db.Exec(`
+		ALTER TABLE playlist_conversions
+		ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add deleted_at column: %v", err)
+	} else {
+		log.Println("Added deleted_at column to playlist_conversions table (soft delete)")
+	}
+
+	// Add partial index for faster queries on non-deleted records
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_playlist_conversions_not_deleted
+		ON playlist_conversions(user_id, created_at DESC) WHERE deleted_at IS NULL;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add soft delete index: %v", err)
+	}
+
 	log.Println("Database migrations completed successfully")
 }

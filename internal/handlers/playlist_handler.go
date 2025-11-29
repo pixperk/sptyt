@@ -290,10 +290,11 @@ func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
 		}
 	}
 
-	// Get total count
+	// Get total count (excluding soft-deleted)
 	totalCount, err := h.db.NewSelect().
 		Model((*models.PlaylistConversion)(nil)).
 		Where("user_id = ?", user.ID).
+		Where("deleted_at IS NULL").
 		Count(ctx)
 
 	if err != nil {
@@ -301,11 +302,12 @@ func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get conversions")
 	}
 
-	// Get conversions with pagination
+	// Get conversions with pagination (excluding soft-deleted)
 	var conversions []models.PlaylistConversion
 	err = h.db.NewSelect().
 		Model(&conversions).
 		Where("user_id = ?", user.ID).
+		Where("deleted_at IS NULL").
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).
@@ -364,6 +366,71 @@ func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
 		"has_more":    hasMore,
 		"next_offset": nextOffset,
 		"conversions": detailedConversions,
+	})
+}
+
+// DeleteConversion soft deletes a playlist conversion (keeps record for analytics)
+func (h *PlaylistHandler) DeleteConversion(c echo.Context) error {
+	conversionID := c.Param("id")
+	if conversionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Conversion ID required")
+	}
+
+	// Get authenticated user
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
+
+	// Get user from database
+	var user models.User
+	err := h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Find the conversion and verify ownership
+	var conversion models.PlaylistConversion
+	err = h.db.NewSelect().
+		Model(&conversion).
+		Where("id = ? AND user_id = ?", conversionID, user.ID).
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Conversion not found")
+	}
+
+	// Check if already deleted
+	if conversion.IsDeleted() {
+		return echo.NewHTTPError(http.StatusBadRequest, "Conversion already deleted")
+	}
+
+	// Soft delete - set deleted_at timestamp
+	now := time.Now()
+	_, err = h.db.NewUpdate().
+		Model(&conversion).
+		Set("deleted_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("id = ?", conversion.ID).
+		Exec(ctx)
+
+	if err != nil {
+		log.Printf("DeleteConversion: Failed to delete conversion: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to delete conversion")
+	}
+
+	log.Printf("DeleteConversion: User %s soft-deleted conversion %s", user.ID, conversionID)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Playlist removed from your list",
 	})
 }
 

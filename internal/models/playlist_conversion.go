@@ -31,9 +31,15 @@ type PlaylistConversion struct {
 	CreatedAt   time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt   time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 	CompletedAt *time.Time `bun:",nullzero" json:"completed_at,omitempty"`
+	DeletedAt   *time.Time `bun:",nullzero,soft_delete" json:"deleted_at,omitempty"` // Soft delete - keeps record for analytics
 
 	// Relations
 	User *User `bun:"rel:belongs-to,join:user_id=id" json:"user,omitempty"`
+}
+
+// IsDeleted checks if the conversion has been soft deleted
+func (pc *PlaylistConversion) IsDeleted() bool {
+	return pc.DeletedAt != nil
 }
 
 // TrackConversionLog represents the conversion result for a single track
