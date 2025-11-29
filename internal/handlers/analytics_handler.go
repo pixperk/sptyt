@@ -203,10 +203,12 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 
 	// Get user analytics
 	var analytics models.UserAnalytics
-	err = h.db.NewSelect().
+	analyticsErr := h.db.NewSelect().
 		Model(&analytics).
 		Where("user_id = ?", user.ID).
 		Scan(ctx)
+
+	hasAnalytics := analyticsErr == nil
 
 	now := time.Now()
 	currentMonth := int(now.Month())
@@ -224,7 +226,7 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 
 	// Check if analytics exist and are for current month
 	var monthlyConversions int
-	if err == nil && analytics.CurrentMonth == currentMonth && analytics.CurrentYear == currentYear {
+	if hasAnalytics && analytics.CurrentMonth == currentMonth && analytics.CurrentYear == currentYear {
 		monthlyConversions = analytics.MonthlyConversions
 	}
 
@@ -237,7 +239,7 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 		FailedTracks  int
 	}
 
-	err = h.db.NewSelect().
+	detailsErr := h.db.NewSelect().
 		Model((*models.PlaylistConversion)(nil)).
 		ColumnExpr("COALESCE(SUM(track_count), 0) as total_tracks").
 		ColumnExpr("COALESCE(SUM(success_count), 0) as matched_tracks").
@@ -246,26 +248,24 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 		Where("created_at >= ?", startOfMonth).
 		Scan(ctx, &monthlyDetails)
 
-	if err != nil {
-		log.Printf("GetMonthlyStats: Failed to get monthly details: %v", err)
+	if detailsErr != nil {
+		log.Printf("GetMonthlyStats: Failed to get monthly details: %v", detailsErr)
 	}
 
 	// Build YouTube quota info
 	// Check if we need to reset daily quota counters
 	var dailySearches, dailyInserts, quotaUsed, quotaRemaining int
 	var quotaPercentage float64
-	quotaResetNeeded := true
 
-	if err == nil {
-		quotaResetNeeded = analytics.NeedsQuotaReset()
-		if !quotaResetNeeded {
+	if hasAnalytics {
+		if !analytics.NeedsQuotaReset() {
 			dailySearches = analytics.DailyYouTubeSearches
 			dailyInserts = analytics.DailyPlaylistInserts
 			quotaUsed = analytics.GetDailyQuotaUsed()
 			quotaRemaining = analytics.GetDailyQuotaRemaining()
 			quotaPercentage = analytics.GetDailyQuotaPercentage()
 		} else {
-			// Quota was reset, show fresh values
+			// Quota was reset (new day), show fresh values
 			quotaRemaining = models.YouTubeQuotaDailyLimit
 		}
 	} else {
