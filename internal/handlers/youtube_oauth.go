@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"github.com/pixperk/sptyt/internal/database"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -12,7 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/pixperk/sptyt/internal/database"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -22,7 +24,12 @@ import (
 	"github.com/uptrace/bun"
 )
 
-const youtubeScopes = "https://www.googleapis.com/auth/youtube openid profile email"
+// Required scopes for YouTube playlist operations
+// youtube.force-ssl is required for write operations (create playlist, add videos)
+const youtubeScopes = "https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/youtube openid profile email"
+
+// requiredYouTubeScope is the minimum scope needed for playlist operations
+const requiredYouTubeScope = "youtube"
 
 type YouTubeOAuthHandler struct {
 	db           *bun.DB
@@ -294,7 +301,13 @@ func (h *YouTubeOAuthHandler) GetYouTubeAuthStatus(c echo.Context) error {
 	// Check if token is expired or expiring soon (within 5 minutes)
 	isExpired := token.IsExpired()
 	expiresWithin5Min := time.Until(token.ExpiresAt) < 5*time.Minute
-	needsReconnect := isExpired || expiresWithin5Min || token.RefreshToken == ""
+
+	// Check if stored scope has required permissions for playlist operations
+	// If scope doesn't include "youtube" or "youtube.force-ssl", user needs to re-authorize
+	hasSufficientScope := strings.Contains(token.Scope, "youtube")
+	scopeMismatch := !hasSufficientScope
+
+	needsReconnect := isExpired || expiresWithin5Min || token.RefreshToken == "" || scopeMismatch
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"authorized":         true,
@@ -305,6 +318,7 @@ func (h *YouTubeOAuthHandler) GetYouTubeAuthStatus(c echo.Context) error {
 		"is_expired":         isExpired,
 		"expires_soon":       expiresWithin5Min,
 		"needs_reconnect":    needsReconnect,
+		"scope_mismatch":     scopeMismatch,
 		"has_refresh_token":  token.RefreshToken != "",
 		"scope":              token.Scope,
 		"time_until_expiry":  time.Until(token.ExpiresAt).String(),

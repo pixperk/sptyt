@@ -250,6 +250,28 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 		log.Printf("GetMonthlyStats: Failed to get monthly details: %v", err)
 	}
 
+	// Build YouTube quota info
+	// Check if we need to reset daily quota counters
+	var dailySearches, dailyInserts, quotaUsed, quotaRemaining int
+	var quotaPercentage float64
+	quotaResetNeeded := true
+
+	if err == nil {
+		quotaResetNeeded = analytics.NeedsQuotaReset()
+		if !quotaResetNeeded {
+			dailySearches = analytics.DailyYouTubeSearches
+			dailyInserts = analytics.DailyPlaylistInserts
+			quotaUsed = analytics.GetDailyQuotaUsed()
+			quotaRemaining = analytics.GetDailyQuotaRemaining()
+			quotaPercentage = analytics.GetDailyQuotaPercentage()
+		} else {
+			// Quota was reset, show fresh values
+			quotaRemaining = models.YouTubeQuotaDailyLimit
+		}
+	} else {
+		quotaRemaining = models.YouTubeQuotaDailyLimit
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"month":             now.Format("January 2006"),
 		"month_num":         currentMonth,
@@ -267,6 +289,18 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 			"total_tracks":        monthlyDetails.TotalTracks,
 			"matched_tracks":      monthlyDetails.MatchedTracks,
 			"failed_tracks":       monthlyDetails.FailedTracks,
+		},
+		"youtube_quota": map[string]interface{}{
+			"daily_searches":     dailySearches,
+			"daily_inserts":      dailyInserts,
+			"quota_used":         quotaUsed,
+			"quota_remaining":    quotaRemaining,
+			"quota_limit":        models.YouTubeQuotaDailyLimit,
+			"usage_percentage":   quotaPercentage,
+			"is_user_quota":      true, // Uses user's YouTube OAuth token quota
+			"resets_at":          "midnight Pacific Time",
+			"cost_per_search":    models.YouTubeQuotaCostSearch,
+			"cost_per_insert":    models.YouTubeQuotaCostPlaylistInsert,
 		},
 		"can_convert": monthlyConversions < maxPlaylists,
 	})

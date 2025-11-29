@@ -241,5 +241,18 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Added profile_image column to custom_links table")
 	}
 
+	// Add YouTube quota tracking columns to user_analytics
+	_, err = db.Exec(`
+		ALTER TABLE user_analytics
+		ADD COLUMN IF NOT EXISTS daily_youtube_searches INTEGER DEFAULT 0,
+		ADD COLUMN IF NOT EXISTS daily_playlist_inserts INTEGER DEFAULT 0,
+		ADD COLUMN IF NOT EXISTS last_quota_reset_date TIMESTAMP;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add YouTube quota tracking columns: %v", err)
+	} else {
+		log.Println("Added YouTube quota tracking columns to user_analytics table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }

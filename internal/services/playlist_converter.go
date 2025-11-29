@@ -19,7 +19,7 @@ import (
 
 // AnalyticsTaskClient interface for enqueuing analytics tasks (avoids import cycle)
 type AnalyticsTaskClient interface {
-	EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool) error
+	EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int) error
 }
 
 type PlaylistConverterService struct {
@@ -61,6 +61,7 @@ type TrackMatchResult struct {
 	VideoID     string
 	Error       error
 	MatchMethod string
+	SearchCount int // Number of YouTube search API calls made for this track
 }
 
 // isYouTubeAPIError checks if an error is a YouTube API error that shouldn't count against quota
@@ -201,8 +202,11 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	// Add matched videos to YouTube playlist
 	var conversionLogs []models.TrackConversionLog
 	var videoIDs []string
+	totalSearches := 0 // Track total YouTube search API calls
 
 	for _, result := range matchResults {
+		totalSearches += result.SearchCount // Sum up searches from all tracks
+
 		logEntry := models.TrackConversionLog{
 			SpotifyTrackID:   result.Track.ID,
 			SpotifyTrackName: result.Track.Name,
@@ -233,9 +237,13 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	log.Printf("ConversionService: Matched %d/%d tracks successfully", conversion.SuccessCount, conversion.TrackCount)
 
 	// Add videos to YouTube playlist in batches with rate limiting
+	playlistInserts := 0 // Track successful playlist insert API calls
 	if len(videoIDs) > 0 {
 		log.Printf("ConversionService: Adding %d videos to YouTube playlist", len(videoIDs))
 		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, job.YouTubeAccessToken, youtubePlaylistID, videoIDs)
+
+		// Calculate successful inserts (each video added = 1 playlist insert API call)
+		playlistInserts = len(videoIDs) - len(addErrors)
 
 		// Log any errors adding videos
 		for videoID, err := range addErrors {
@@ -270,11 +278,12 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	}
 
 	rowsAffected, _ := result.RowsAffected()
-	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed (DB rows affected: %d)", conversion.ID, conversion.SuccessCount, conversion.FailureCount, rowsAffected)
+	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed, %d searches, %d inserts (DB rows affected: %d)",
+		conversion.ID, conversion.SuccessCount, conversion.FailureCount, totalSearches, playlistInserts, rowsAffected)
 
-	// Enqueue analytics update task (async)
+	// Enqueue analytics update task (async) - includes YouTube quota tracking
 	isSuccess := conversion.Status == "completed"
-	if err := s.taskClient.EnqueueAnalyticsUpdate(job.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount, conversion.CountsAgainstQuota); err != nil {
+	if err := s.taskClient.EnqueueAnalyticsUpdate(job.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount, conversion.CountsAgainstQuota, totalSearches, playlistInserts); err != nil {
 		log.Printf("ConversionService: WARNING - Failed to enqueue analytics update task: %v", err)
 		// Don't fail the conversion if analytics enqueue fails
 	}
@@ -389,7 +398,8 @@ func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerI
 // Uses user's OAuth token for searches (uses user's YouTube quota, not server's)
 func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, track *spotify.PlaylistTrack, useLyricVideos bool, accessToken string) TrackMatchResult {
 	result := TrackMatchResult{
-		Track: track,
+		Track:       track,
+		SearchCount: 0,
 	}
 
 	artistsStr := strings.Join(track.Artists, " ")
@@ -400,6 +410,7 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 
 	// Strategy 1: Official Music Video (using user's quota via OAuth token)
 	if !useLyricVideos {
+		result.SearchCount++ // Count this search
 		videoURL, err = s.youtubeClient.SearchOfficialMVWithToken(ctx, accessToken, track.Name, artistsStr)
 		if err == nil && videoURL != "" {
 			result.YouTubeURL = videoURL
@@ -410,6 +421,7 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 	}
 
 	// Strategy 2: Lyric Video (using user's quota via OAuth token)
+	result.SearchCount++ // Count this search
 	videoURL, err = s.youtubeClient.SearchLyricVideoWithToken(ctx, accessToken, track.Name, artistsStr)
 	if err == nil && videoURL != "" {
 		result.YouTubeURL = videoURL
@@ -548,16 +560,16 @@ func (s *PlaylistConverterService) publishProgress(userID string, conversionID s
 }
 
 // UpdateUserAnalytics updates or creates user analytics record (accepts string UUID)
-func (s *PlaylistConverterService) UpdateUserAnalytics(ctx context.Context, userIDStr string, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool) error {
+func (s *PlaylistConverterService) UpdateUserAnalytics(ctx context.Context, userIDStr string, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int) error {
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return fmt.Errorf("invalid user ID: %w", err)
 	}
-	return s.updateUserAnalytics(ctx, userID, spotifyType, isSuccess, trackCount, successCount, failureCount, countsAgainstQuota)
+	return s.updateUserAnalytics(ctx, userID, spotifyType, isSuccess, trackCount, successCount, failureCount, countsAgainstQuota, youtubeSearches, playlistInserts)
 }
 
 // updateUserAnalytics updates or creates user analytics record (internal method)
-func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool) error {
+func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int) error {
 	now := time.Now()
 
 	// Try to get existing analytics record
@@ -583,6 +595,9 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 			MonthlyConversions:   monthlyConversions,
 			CurrentMonth:         int(now.Month()),
 			CurrentYear:          now.Year(),
+			DailyYouTubeSearches: youtubeSearches,
+			DailyPlaylistInserts: playlistInserts,
+			LastQuotaResetDate:   &now,
 			FirstConversionAt:    &now,
 			LastConversionAt:     &now,
 			CreatedAt:            now,
@@ -614,6 +629,21 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 		Set("total_tracks_failed = total_tracks_failed + ?", failureCount).
 		Set("last_conversion_at = ?", now).
 		Set("updated_at = ?", now)
+
+	// Update YouTube quota tracking
+	// Check if we need to reset daily quota counters (new day)
+	if analytics.NeedsQuotaReset() {
+		// New day, reset counters
+		update = update.
+			Set("daily_youtube_searches = ?", youtubeSearches).
+			Set("daily_playlist_inserts = ?", playlistInserts).
+			Set("last_quota_reset_date = ?", now)
+	} else {
+		// Same day, increment
+		update = update.
+			Set("daily_youtube_searches = daily_youtube_searches + ?", youtubeSearches).
+			Set("daily_playlist_inserts = daily_playlist_inserts + ?", playlistInserts)
+	}
 
 	// Only update monthly counter if this conversion counts against quota
 	if countsAgainstQuota {

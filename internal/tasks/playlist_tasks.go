@@ -47,6 +47,8 @@ type AnalyticsUpdatePayload struct {
 	SuccessCount       int    `json:"success_count"`        // Successfully matched tracks
 	FailureCount       int    `json:"failure_count"`        // Failed tracks
 	CountsAgainstQuota bool   `json:"counts_against_quota"` // Whether conversion counts against quota
+	YouTubeSearches    int    `json:"youtube_searches"`     // Number of YouTube search API calls made
+	PlaylistInserts    int    `json:"playlist_inserts"`     // Number of playlist insert API calls made
 }
 
 // NewAnalyticsUpdateTask creates a new Asynq task for analytics updates
@@ -107,10 +109,13 @@ func (p *PlaylistConversionProcessor) ProcessAnalyticsUpdate(ctx context.Context
 		return fmt.Errorf("failed to unmarshal analytics payload: %w", err)
 	}
 
-	log.Printf("Processing analytics update task for user: %s (counts_against_quota: %v)", payload.UserID, payload.CountsAgainstQuota)
+	log.Printf("Processing analytics update task for user: %s (counts_against_quota: %v, searches: %d, inserts: %d)",
+		payload.UserID, payload.CountsAgainstQuota, payload.YouTubeSearches, payload.PlaylistInserts)
 
 	// Call the analytics update service method
-	err := p.converterService.UpdateUserAnalytics(ctx, payload.UserID, payload.SpotifyType, payload.IsSuccess, payload.TrackCount, payload.SuccessCount, payload.FailureCount, payload.CountsAgainstQuota)
+	err := p.converterService.UpdateUserAnalytics(ctx, payload.UserID, payload.SpotifyType, payload.IsSuccess,
+		payload.TrackCount, payload.SuccessCount, payload.FailureCount, payload.CountsAgainstQuota,
+		payload.YouTubeSearches, payload.PlaylistInserts)
 	if err != nil {
 		log.Printf("Analytics update failed: %v", err)
 		return fmt.Errorf("analytics update failed: %w", err)
