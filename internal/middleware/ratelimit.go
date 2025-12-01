@@ -118,9 +118,21 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			// Skip rate limiting for health check endpoints
+			// Skip rate limiting for certain endpoints
 			path := c.Path()
+
+			// Health check endpoints
 			if path == "/health" || path == "/ping" {
+				return next(c)
+			}
+
+			// WebSocket endpoint (has its own connection management)
+			if path == "/api/ws/playlist-progress" {
+				return next(c)
+			}
+
+			// Webhook endpoints (verified by signature, not IP)
+			if path == "/webhooks/dodopay" {
 				return next(c)
 			}
 

@@ -29,9 +29,9 @@ func NewServer(cfg *config.RedisConfig, converterService *services.PlaylistConve
 				"default":  3,
 				"low":      1,
 			},
-			// Reduce Redis polling frequency to minimize commands
-			HealthCheckInterval:      30 * time.Second, // Default: 15s - check worker health less frequently
-			DelayedTaskCheckInterval: 30 * time.Second, // Default: 5s - check scheduled tasks less frequently
+			// Significantly reduce Redis polling frequency to minimize commands
+			HealthCheckInterval:      60 * time.Second, // Default: 15s - check worker health every minute
+			DelayedTaskCheckInterval: 60 * time.Second, // Default: 5s - check scheduled tasks every minute
 			StrictPriority:           true,             // Process higher priority queues first (more efficient)
 		},
 	)
