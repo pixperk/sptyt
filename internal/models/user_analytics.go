@@ -39,9 +39,9 @@ type UserAnalytics struct {
 	// YouTube quota tracking (uses user's OAuth token quota)
 	// YouTube API costs: Search = 100 units, Playlist operations = 50 units
 	// Daily limit is typically 10,000 units per user
-	DailyYouTubeSearches int        `bun:",default:0" json:"daily_youtube_searches"`
-	DailyPlaylistInserts int        `bun:",default:0" json:"daily_playlist_inserts"`
-	LastQuotaResetDate   *time.Time `bun:",nullzero" json:"last_quota_reset_date,omitempty"`
+	DailyYouTubeSearches int        `bun:"daily_youtube_searches,default:0" json:"daily_youtube_searches"`
+	DailyPlaylistInserts int        `bun:"daily_playlist_inserts,default:0" json:"daily_playlist_inserts"`
+	LastQuotaResetDate   *time.Time `bun:"last_quota_reset_date,nullzero" json:"last_quota_reset_date,omitempty"`
 
 	// Time tracking
 	FirstConversionAt *time.Time `bun:",nullzero" json:"first_conversion_at,omitempty"`
