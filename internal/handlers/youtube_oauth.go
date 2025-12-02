@@ -24,8 +24,9 @@ import (
 )
 
 // Required scopes for YouTube playlist operations
-// youtube.force-ssl is required for write operations (create playlist, add videos)
-const youtubeScopes = "https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/youtube openid profile email"
+// youtube.force-ssl is the minimum scope needed for write operations (create playlist, add videos)
+// openid, email, profile are needed to get Google account info for display and quota tracking
+const youtubeScopes = "https://www.googleapis.com/auth/youtube.force-ssl openid email profile"
 
 // requiredYouTubeScope is the minimum scope needed for playlist operations
 const requiredYouTubeScope = "youtube"
