@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pixperk/sptyt/internal/cache"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/spotify"
 	ws "github.com/pixperk/sptyt/internal/websocket"
@@ -28,16 +29,26 @@ type PlaylistConverterService struct {
 	youtubeClient *youtube.Client
 	wsHub         *ws.Hub
 	taskClient    AnalyticsTaskClient
+	cache         *cache.RedisCache
 	workerCount   int
 }
 
-func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, wsHub *ws.Hub, taskClient AnalyticsTaskClient) *PlaylistConverterService {
+// YouTubeSearchCacheTTL is the TTL for cached YouTube search results (48 hours)
+// YouTube videos don't change often, so a longer TTL is appropriate
+const YouTubeSearchCacheTTL = 48 * time.Hour
+
+// YouTubeNotFoundCacheTTL is the TTL for caching "not found" results (6 hours)
+// Shorter TTL to allow retries if a video becomes available
+const YouTubeNotFoundCacheTTL = 6 * time.Hour
+
+func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, wsHub *ws.Hub, taskClient AnalyticsTaskClient, redisCache *cache.RedisCache) *PlaylistConverterService {
 	return &PlaylistConverterService{
 		db:            db,
 		spotifyClient: spotifyClient,
 		youtubeClient: youtubeClient,
 		wsHub:         wsHub,
 		taskClient:    taskClient,
+		cache:         redisCache,
 		workerCount:   5, // 5 concurrent workers
 	}
 }
@@ -391,6 +402,7 @@ func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerI
 
 // matchTrackToYouTube matches a single Spotify track to a YouTube video
 // Uses user's OAuth token for searches (uses user's YouTube quota, not server's)
+// Caches successful searches to avoid redundant API calls
 func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, track *spotify.PlaylistTrack, useLyricVideos bool, accessToken string) TrackMatchResult {
 	result := TrackMatchResult{
 		Track:       track,
@@ -398,6 +410,24 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 	}
 
 	artistsStr := strings.Join(track.Artists, " ")
+
+	// Check cache first (if available)
+	if s.cache != nil {
+		cached, err := s.cache.GetYouTubeSearchResult(ctx, track.Name, artistsStr, useLyricVideos)
+		if err == nil && cached != nil {
+			// Cache hit!
+			if cached.VideoID == "" {
+				// Cached "not found" result
+				result.Error = fmt.Errorf("no YouTube video found (cached)")
+				return result
+			}
+			result.YouTubeURL = cached.VideoURL
+			result.VideoID = cached.VideoID
+			result.MatchMethod = cached.MatchMethod + "_cached"
+			return result
+		}
+		// Cache miss - continue with API search
+	}
 
 	// Try different matching strategies
 	var videoURL string
@@ -411,6 +441,9 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 			result.YouTubeURL = videoURL
 			result.VideoID = extractVideoID(videoURL)
 			result.MatchMethod = "official_mv"
+
+			// Cache the successful result
+			s.cacheYouTubeResult(ctx, track.Name, artistsStr, useLyricVideos, result.VideoID, videoURL, result.MatchMethod)
 			return result
 		}
 	}
@@ -422,12 +455,36 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 		result.YouTubeURL = videoURL
 		result.VideoID = extractVideoID(videoURL)
 		result.MatchMethod = "lyric_video"
+
+		// Cache the successful result
+		s.cacheYouTubeResult(ctx, track.Name, artistsStr, useLyricVideos, result.VideoID, videoURL, result.MatchMethod)
 		return result
 	}
 
-	// No match found
+	// No match found - cache the "not found" result to avoid repeated searches
+	if s.cache != nil {
+		_ = s.cache.CacheYouTubeNotFound(ctx, track.Name, artistsStr, useLyricVideos, YouTubeNotFoundCacheTTL)
+	}
+
 	result.Error = fmt.Errorf("no YouTube video found")
 	return result
+}
+
+// cacheYouTubeResult caches a successful YouTube search result
+func (s *PlaylistConverterService) cacheYouTubeResult(ctx context.Context, trackName, artists string, useLyricVideos bool, videoID, videoURL, matchMethod string) {
+	if s.cache == nil {
+		return
+	}
+
+	result := &cache.YouTubeSearchResult{
+		VideoID:     videoID,
+		VideoURL:    videoURL,
+		MatchMethod: matchMethod,
+	}
+
+	if err := s.cache.SetYouTubeSearchResult(ctx, trackName, artists, useLyricVideos, result, YouTubeSearchCacheTTL); err != nil {
+		log.Printf("Warning: Failed to cache YouTube search result: %v", err)
+	}
 }
 
 // extractVideoID extracts video ID from YouTube URL

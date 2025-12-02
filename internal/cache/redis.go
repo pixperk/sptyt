@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/pixperk/sptyt/internal/config"
@@ -111,4 +112,72 @@ func (r *RedisCache) Get(ctx context.Context, key string) (string, error) {
 
 func (r *RedisCache) Delete(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key).Err()
+}
+
+// YouTubeSearchResult represents a cached YouTube search result
+type YouTubeSearchResult struct {
+	VideoID     string `json:"video_id"`
+	VideoURL    string `json:"video_url"`
+	MatchMethod string `json:"match_method"` // official_mv or lyric_video
+}
+
+// normalizeSearchKey creates a consistent cache key from track name and artists
+// This allows cache hits across different Spotify track IDs for the same song
+func normalizeSearchKey(trackName string, artists string) string {
+	// Lowercase and trim spaces for consistency
+	key := strings.ToLower(strings.TrimSpace(trackName) + ":" + strings.TrimSpace(artists))
+	// Remove common variations that don't change the song
+	key = strings.ReplaceAll(key, " - ", " ")
+	key = strings.ReplaceAll(key, "  ", " ")
+	return key
+}
+
+// GetYouTubeSearchResult gets a cached YouTube search result by track name and artists
+func (r *RedisCache) GetYouTubeSearchResult(ctx context.Context, trackName, artists string, useLyricVideos bool) (*YouTubeSearchResult, error) {
+	searchType := "mv"
+	if useLyricVideos {
+		searchType = "lyric"
+	}
+	key := "yt:search:" + searchType + ":" + normalizeSearchKey(trackName, artists)
+
+	val, err := r.client.Get(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var result YouTubeSearchResult
+	if err := json.Unmarshal([]byte(val), &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// SetYouTubeSearchResult caches a YouTube search result
+func (r *RedisCache) SetYouTubeSearchResult(ctx context.Context, trackName, artists string, useLyricVideos bool, result *YouTubeSearchResult, ttl time.Duration) error {
+	searchType := "mv"
+	if useLyricVideos {
+		searchType = "lyric"
+	}
+	key := "yt:search:" + searchType + ":" + normalizeSearchKey(trackName, artists)
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+
+	return r.client.Set(ctx, key, data, ttl).Err()
+}
+
+// CacheYouTubeNotFound caches that no YouTube video was found for a track
+// This prevents repeated searches for tracks that don't have YouTube matches
+func (r *RedisCache) CacheYouTubeNotFound(ctx context.Context, trackName, artists string, useLyricVideos bool, ttl time.Duration) error {
+	searchType := "mv"
+	if useLyricVideos {
+		searchType = "lyric"
+	}
+	key := "yt:search:" + searchType + ":" + normalizeSearchKey(trackName, artists)
+
+	// Store empty result to indicate "not found"
+	return r.client.Set(ctx, key, "{\"video_id\":\"\"}", ttl).Err()
 }
