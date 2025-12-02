@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -180,4 +181,59 @@ func (r *RedisCache) CacheYouTubeNotFound(ctx context.Context, trackName, artist
 
 	// Store empty result to indicate "not found"
 	return r.client.Set(ctx, key, "{\"video_id\":\"\"}", ttl).Err()
+}
+
+// SpotifySearchResult represents cached Spotify search results
+type SpotifySearchResult struct {
+	Query   string                 `json:"query"`
+	Results []SpotifySearchTrack   `json:"results"`
+}
+
+type SpotifySearchTrack struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Artists    []string `json:"artists"`
+	Album      string   `json:"album"`
+	CoverImage string   `json:"cover_image"`
+	Duration   int      `json:"duration_ms"`
+	SpotifyURL string   `json:"spotify_url"`
+}
+
+// normalizeSpotifySearchKey creates a consistent cache key for Spotify searches
+func normalizeSpotifySearchKey(query string, limit int) string {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	normalized = strings.ReplaceAll(normalized, "  ", " ")
+	return fmt.Sprintf("spotify:search:%d:%s", limit, normalized)
+}
+
+// GetSpotifySearchResults gets cached Spotify search results
+func (r *RedisCache) GetSpotifySearchResults(ctx context.Context, query string, limit int) ([]SpotifySearchTrack, error) {
+	key := normalizeSpotifySearchKey(query, limit)
+
+	val, err := r.client.Get(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var result SpotifySearchResult
+	if err := json.Unmarshal([]byte(val), &result); err != nil {
+		return nil, err
+	}
+
+	return result.Results, nil
+}
+
+// SetSpotifySearchResults caches Spotify search results
+func (r *RedisCache) SetSpotifySearchResults(ctx context.Context, query string, limit int, results []SpotifySearchTrack, ttl time.Duration) error {
+	key := normalizeSpotifySearchKey(query, limit)
+
+	data, err := json.Marshal(SpotifySearchResult{
+		Query:   query,
+		Results: results,
+	})
+	if err != nil {
+		return err
+	}
+
+	return r.client.Set(ctx, key, data, ttl).Err()
 }

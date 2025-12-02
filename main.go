@@ -142,7 +142,7 @@ func main() {
 
 	// Custom link public routes (no auth required)
 	customLinkService := services.NewCustomLinkService(cfg.DB)
-	customLinkHandler := handlers.NewCustomLinkHandler(customLinkService, cfg.DB, spotifyClient, youtubeClient, geniusClient)
+	customLinkHandler := handlers.NewCustomLinkHandler(customLinkService, cfg.DB, spotifyClient, youtubeClient, geniusClient, redisCache)
 
 	// Public custom link routes (use /l/ prefix to avoid conflict with protected /api/links)
 	e.GET("/api/l/:slug", customLinkHandler.GetLinkBySlugPublic)                              // API to get link data
@@ -210,6 +210,7 @@ func main() {
 		api.GET("/links/:id/analytics", customLinkHandler.GetLinkAnalytics)                  // Get link analytics
 		api.GET("/links/conversions/:conversion_id/songs", customLinkHandler.GetConversionSongs) // Get songs from a conversion
 		api.GET("/links/element-data/song", customLinkHandler.GetSongElementData)            // Get element data for a song
+		api.GET("/links/search/spotify", customLinkHandler.SearchSpotifyTracks)               // Search Spotify tracks for custom links
 
 		log.Println("Clerk authentication enabled - /api/me route available")
 		log.Println("WebSocket server running - /api/ws/playlist-progress available")

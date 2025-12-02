@@ -8,10 +8,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
+	"github.com/pixperk/sptyt/internal/cache"
 	"github.com/pixperk/sptyt/internal/database"
 	"github.com/pixperk/sptyt/internal/genius"
 	"github.com/pixperk/sptyt/internal/models"
@@ -22,6 +24,9 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// SpotifySearchCacheTTL is the TTL for cached Spotify search results (1 hour)
+const SpotifySearchCacheTTL = 1 * time.Hour
+
 type CustomLinkHandler struct {
 	service       *services.CustomLinkService
 	db            *bun.DB
@@ -29,9 +34,10 @@ type CustomLinkHandler struct {
 	spotifyClient *spotify.Client
 	youtubeClient *youtube.Client
 	geniusClient  *genius.Client
+	cache         *cache.RedisCache
 }
 
-func NewCustomLinkHandler(service *services.CustomLinkService, db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, geniusClient *genius.Client) *CustomLinkHandler {
+func NewCustomLinkHandler(service *services.CustomLinkService, db *bun.DB, spotifyClient *spotify.Client, youtubeClient *youtube.Client, geniusClient *genius.Client, redisCache *cache.RedisCache) *CustomLinkHandler {
 	frontendURL := os.Getenv("FRONTEND_URL")
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
@@ -44,6 +50,7 @@ func NewCustomLinkHandler(service *services.CustomLinkService, db *bun.DB, spoti
 		spotifyClient: spotifyClient,
 		youtubeClient: youtubeClient,
 		geniusClient:  geniusClient,
+		cache:         redisCache,
 	}
 }
 
@@ -817,5 +824,63 @@ func (h *CustomLinkHandler) GetConversionSongsPublic(c echo.Context) error {
 		"spotify_playlist_url": conversion.SpotifyPlaylistURL,
 		"youtube_playlist_url": conversion.YouTubePlaylistURL,
 		"songs":                conversion.ConversionLog,
+	})
+}
+
+// SearchSpotifyTracks searches for tracks on Spotify with caching
+func (h *CustomLinkHandler) SearchSpotifyTracks(c echo.Context) error {
+	query := c.QueryParam("q")
+	if query == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Query parameter 'q' is required")
+	}
+
+	// Limit results (default 10, max 20)
+	limit := 10
+	if limitStr := c.QueryParam("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 20 {
+			limit = l
+		}
+	}
+
+	ctx := c.Request().Context()
+
+	// Check cache first
+	if h.cache != nil {
+		cached, err := h.cache.GetSpotifySearchResults(ctx, query, limit)
+		if err == nil && cached != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"results": cached,
+				"cached":  true,
+			})
+		}
+	}
+
+	// Cache miss - search Spotify
+	results, err := h.spotifyClient.SearchTracks(ctx, query, limit)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to search Spotify")
+	}
+
+	// Cache the results
+	if h.cache != nil && len(results) > 0 {
+		// Convert to cache format
+		cacheResults := make([]cache.SpotifySearchTrack, len(results))
+		for i, r := range results {
+			cacheResults[i] = cache.SpotifySearchTrack{
+				ID:         r.ID,
+				Name:       r.Name,
+				Artists:    r.Artists,
+				Album:      r.Album,
+				CoverImage: r.CoverImage,
+				Duration:   r.Duration,
+				SpotifyURL: r.SpotifyURL,
+			}
+		}
+		_ = h.cache.SetSpotifySearchResults(ctx, query, limit, cacheResults, SpotifySearchCacheTTL)
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"results": results,
+		"cached":  false,
 	})
 }

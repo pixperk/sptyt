@@ -392,6 +392,106 @@ func (c *Client) SearchByTitle(ctx context.Context, query string) (string, error
 	return searchResp.Tracks.Items[0].ExternalUrls.Spotify, nil
 }
 
+// SearchTrackResult represents a single track in search results
+type SearchTrackResult struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Artists    []string `json:"artists"`
+	Album      string   `json:"album"`
+	CoverImage string   `json:"cover_image"`
+	Duration   int      `json:"duration_ms"`
+	SpotifyURL string   `json:"spotify_url"`
+}
+
+// SearchTracks searches for tracks and returns multiple results
+func (c *Client) SearchTracks(ctx context.Context, query string, limit int) ([]SearchTrackResult, error) {
+	if err := c.authenticate(ctx); err != nil {
+		return nil, err
+	}
+
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+
+	c.mu.RLock()
+	token := c.accessToken
+	c.mu.RUnlock()
+
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("type", "track")
+	params.Set("limit", fmt.Sprintf("%d", limit))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.spotify.com/v1/search?"+params.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("spotify search failed: %s", body)
+	}
+
+	var searchResp struct {
+		Tracks struct {
+			Items []struct {
+				ID      string `json:"id"`
+				Name    string `json:"name"`
+				Artists []struct {
+					Name string `json:"name"`
+				} `json:"artists"`
+				Album struct {
+					Name   string `json:"name"`
+					Images []struct {
+						URL string `json:"url"`
+					} `json:"images"`
+				} `json:"album"`
+				DurationMS   int `json:"duration_ms"`
+				ExternalUrls struct {
+					Spotify string `json:"spotify"`
+				} `json:"external_urls"`
+			} `json:"items"`
+		} `json:"tracks"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, err
+	}
+
+	results := make([]SearchTrackResult, 0, len(searchResp.Tracks.Items))
+	for _, item := range searchResp.Tracks.Items {
+		artists := make([]string, len(item.Artists))
+		for i, artist := range item.Artists {
+			artists[i] = artist.Name
+		}
+
+		coverImage := ""
+		if len(item.Album.Images) > 0 {
+			coverImage = item.Album.Images[0].URL
+		}
+
+		results = append(results, SearchTrackResult{
+			ID:         item.ID,
+			Name:       item.Name,
+			Artists:    artists,
+			Album:      item.Album.Name,
+			CoverImage: coverImage,
+			Duration:   item.DurationMS,
+			SpotifyURL: item.ExternalUrls.Spotify,
+		})
+	}
+
+	return results, nil
+}
+
 func (c *Client) GetTrackByISRC(ctx context.Context, isrc string) (*Track, error) {
 	if err := c.authenticate(ctx); err != nil {
 		return nil, err
