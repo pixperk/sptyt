@@ -32,7 +32,7 @@ func (c *Client) EnqueuePlaylistConversion(payload PlaylistConversionPayload) er
 }
 
 // EnqueueAnalyticsUpdate enqueues an analytics update task (implements services.AnalyticsTaskClient)
-func (c *Client) EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int) error {
+func (c *Client) EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int, googleAccountEmail string) error {
 	payload := AnalyticsUpdatePayload{
 		UserID:             userID,
 		SpotifyType:        spotifyType,
@@ -43,6 +43,7 @@ func (c *Client) EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bo
 		CountsAgainstQuota: countsAgainstQuota,
 		YouTubeSearches:    youtubeSearches,
 		PlaylistInserts:    playlistInserts,
+		GoogleAccountEmail: googleAccountEmail,
 	}
 
 	task, err := NewAnalyticsUpdateTask(payload)

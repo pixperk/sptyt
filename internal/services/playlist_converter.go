@@ -19,7 +19,7 @@ import (
 
 // AnalyticsTaskClient interface for enqueuing analytics tasks (avoids import cycle)
 type AnalyticsTaskClient interface {
-	EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int) error
+	EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int, googleAccountEmail string) error
 }
 
 type PlaylistConverterService struct {
@@ -52,6 +52,7 @@ type ConversionJob struct {
 	YouTubeAccessToken  string
 	YouTubePlaylistName string
 	UseLyricVideos      bool
+	GoogleAccountEmail  string // Google account email for quota tracking
 }
 
 type TrackMatchResult struct {
@@ -264,7 +265,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	// Enqueue analytics update task (async) - includes YouTube quota tracking
 	isSuccess := conversion.Status == "completed"
-	if err := s.taskClient.EnqueueAnalyticsUpdate(job.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount, conversion.CountsAgainstQuota, totalSearches, playlistInserts); err != nil {
+	if err := s.taskClient.EnqueueAnalyticsUpdate(job.UserID, job.SpotifyType, isSuccess, conversion.TrackCount, conversion.SuccessCount, conversion.FailureCount, conversion.CountsAgainstQuota, totalSearches, playlistInserts, job.GoogleAccountEmail); err != nil {
 		log.Printf("ConversionService: WARNING - Failed to enqueue analytics update task: %v", err)
 		// Don't fail the conversion if analytics enqueue fails
 	}
@@ -542,17 +543,25 @@ func (s *PlaylistConverterService) publishProgress(userID string, conversionID s
 }
 
 // UpdateUserAnalytics updates or creates user analytics record (accepts string UUID)
-func (s *PlaylistConverterService) UpdateUserAnalytics(ctx context.Context, userIDStr string, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int) error {
+func (s *PlaylistConverterService) UpdateUserAnalytics(ctx context.Context, userIDStr string, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int, googleAccountEmail string) error {
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return fmt.Errorf("invalid user ID: %w", err)
 	}
-	return s.updateUserAnalytics(ctx, userID, spotifyType, isSuccess, trackCount, successCount, failureCount, countsAgainstQuota, youtubeSearches, playlistInserts)
+	return s.updateUserAnalytics(ctx, userID, spotifyType, isSuccess, trackCount, successCount, failureCount, countsAgainstQuota, youtubeSearches, playlistInserts, googleAccountEmail)
 }
 
 // updateUserAnalytics updates or creates user analytics record (internal method)
-func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int) error {
+func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, userID uuid.UUID, spotifyType string, isSuccess bool, trackCount, successCount, failureCount int, countsAgainstQuota bool, youtubeSearches, playlistInserts int, googleAccountEmail string) error {
 	now := time.Now()
+
+	// Update YouTube account quota (per Google account, not per user)
+	if googleAccountEmail != "" && (youtubeSearches > 0 || playlistInserts > 0) {
+		if err := s.updateYouTubeAccountQuota(ctx, googleAccountEmail, youtubeSearches, playlistInserts); err != nil {
+			log.Printf("Warning: Failed to update YouTube account quota for %s: %v", googleAccountEmail, err)
+			// Don't fail the analytics update if quota tracking fails
+		}
+	}
 
 	// Try to get existing analytics record
 	var analytics models.UserAnalytics
@@ -656,5 +665,54 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 	}
 
 	_, err = update.Where("user_id = ?", userID).Exec(ctx)
+	return err
+}
+
+// updateYouTubeAccountQuota updates or creates YouTube quota record per Google account
+func (s *PlaylistConverterService) updateYouTubeAccountQuota(ctx context.Context, accountEmail string, searches, inserts int) error {
+	now := time.Now()
+
+	// Try to get existing quota record
+	var quota models.YouTubeAccountQuota
+	err := s.db.NewSelect().
+		Model(&quota).
+		Where("account_email = ?", accountEmail).
+		Scan(ctx)
+
+	if err != nil {
+		// Record doesn't exist, create it
+		quota = models.YouTubeAccountQuota{
+			AccountEmail:         accountEmail,
+			DailySearches:        searches,
+			DailyPlaylistInserts: inserts,
+			LastQuotaResetDate:   &now,
+			CreatedAt:            now,
+			UpdatedAt:            now,
+		}
+
+		_, err = s.db.NewInsert().Model(&quota).Exec(ctx)
+		return err
+	}
+
+	// Record exists, update it
+	update := s.db.NewUpdate().
+		Model(&quota).
+		Set("updated_at = ?", now)
+
+	// Check if we need to reset daily quota counters (new day)
+	if quota.NeedsQuotaReset() {
+		// New day, reset counters
+		update = update.
+			Set("daily_searches = ?", searches).
+			Set("daily_playlist_inserts = ?", inserts).
+			Set("last_quota_reset_date = ?", now)
+	} else {
+		// Same day, increment
+		update = update.
+			Set("daily_searches = daily_searches + ?", searches).
+			Set("daily_playlist_inserts = daily_playlist_inserts + ?", inserts)
+	}
+
+	_, err = update.Where("account_email = ?", accountEmail).Exec(ctx)
 	return err
 }

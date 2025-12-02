@@ -252,23 +252,44 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 		log.Printf("GetMonthlyStats: Failed to get monthly details: %v", detailsErr)
 	}
 
-	// Build YouTube quota info
-	// Check if we need to reset daily quota counters
+	// Get user's connected YouTube account for quota info
+	var youtubeToken models.UserOAuthToken
+	youtubeErr := h.db.NewSelect().
+		Model(&youtubeToken).
+		Where("user_id = ? AND provider = ?", user.ID, "youtube").
+		Scan(ctx)
+
+	// Build YouTube quota info from YouTubeAccountQuota table (per Google account)
 	var dailySearches, dailyInserts, quotaUsed, quotaRemaining int
 	var quotaPercentage float64
+	var googleAccountEmail string
 
-	if hasAnalytics {
-		if !analytics.NeedsQuotaReset() {
-			dailySearches = analytics.DailyYouTubeSearches
-			dailyInserts = analytics.DailyPlaylistInserts
-			quotaUsed = analytics.GetDailyQuotaUsed()
-			quotaRemaining = analytics.GetDailyQuotaRemaining()
-			quotaPercentage = analytics.GetDailyQuotaPercentage()
+	if youtubeErr == nil && youtubeToken.AccountEmail != "" {
+		googleAccountEmail = youtubeToken.AccountEmail
+
+		var accountQuota models.YouTubeAccountQuota
+		quotaErr := h.db.NewSelect().
+			Model(&accountQuota).
+			Where("account_email = ?", googleAccountEmail).
+			Scan(ctx)
+
+		if quotaErr == nil {
+			if !accountQuota.NeedsQuotaReset() {
+				dailySearches = accountQuota.DailySearches
+				dailyInserts = accountQuota.DailyPlaylistInserts
+				quotaUsed = accountQuota.GetDailyQuotaUsed()
+				quotaRemaining = accountQuota.GetDailyQuotaRemaining()
+				quotaPercentage = accountQuota.GetDailyQuotaPercentage()
+			} else {
+				// Quota was reset (new day), show fresh values
+				quotaRemaining = models.YouTubeQuotaDailyLimit
+			}
 		} else {
-			// Quota was reset (new day), show fresh values
+			// No quota record yet for this account
 			quotaRemaining = models.YouTubeQuotaDailyLimit
 		}
 	} else {
+		// No YouTube account connected
 		quotaRemaining = models.YouTubeQuotaDailyLimit
 	}
 
@@ -291,13 +312,14 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 			"failed_tracks":       monthlyDetails.FailedTracks,
 		},
 		"youtube_quota": map[string]interface{}{
+			"google_account":     googleAccountEmail,
 			"daily_searches":     dailySearches,
 			"daily_inserts":      dailyInserts,
 			"quota_used":         quotaUsed,
 			"quota_remaining":    quotaRemaining,
 			"quota_limit":        models.YouTubeQuotaDailyLimit,
 			"usage_percentage":   quotaPercentage,
-			"is_user_quota":      true, // Uses user's YouTube OAuth token quota
+			"is_account_quota":   true, // Quota is tracked per Google account, not per user
 			"resets_at":          "midnight Pacific Time",
 			"cost_per_search":    models.YouTubeQuotaCostSearch,
 			"cost_per_insert":    models.YouTubeQuotaCostPlaylistInsert,

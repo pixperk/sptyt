@@ -27,6 +27,7 @@ type PlaylistConversionPayload struct {
 	YouTubeAccessToken  string `json:"youtube_access_token"`
 	YouTubePlaylistName string `json:"youtube_playlist_name"`
 	UseLyricVideos      bool   `json:"use_lyric_videos"`
+	GoogleAccountEmail  string `json:"google_account_email"` // Google account email for quota tracking
 }
 
 // NewPlaylistConversionTask creates a new Asynq task for playlist conversion
@@ -49,6 +50,7 @@ type AnalyticsUpdatePayload struct {
 	CountsAgainstQuota bool   `json:"counts_against_quota"` // Whether conversion counts against quota
 	YouTubeSearches    int    `json:"youtube_searches"`     // Number of YouTube search API calls made
 	PlaylistInserts    int    `json:"playlist_inserts"`     // Number of playlist insert API calls made
+	GoogleAccountEmail string `json:"google_account_email"` // Google account email for quota tracking
 }
 
 // NewAnalyticsUpdateTask creates a new Asynq task for analytics updates
@@ -89,6 +91,7 @@ func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Cont
 		YouTubeAccessToken:  payload.YouTubeAccessToken,
 		YouTubePlaylistName: payload.YouTubePlaylistName,
 		UseLyricVideos:      payload.UseLyricVideos,
+		GoogleAccountEmail:  payload.GoogleAccountEmail,
 	}
 
 	// Process the conversion
@@ -109,13 +112,13 @@ func (p *PlaylistConversionProcessor) ProcessAnalyticsUpdate(ctx context.Context
 		return fmt.Errorf("failed to unmarshal analytics payload: %w", err)
 	}
 
-	log.Printf("Processing analytics update task for user: %s (counts_against_quota: %v, searches: %d, inserts: %d)",
-		payload.UserID, payload.CountsAgainstQuota, payload.YouTubeSearches, payload.PlaylistInserts)
+	log.Printf("Processing analytics update task for user: %s, google_account: %s (counts_against_quota: %v, searches: %d, inserts: %d)",
+		payload.UserID, payload.GoogleAccountEmail, payload.CountsAgainstQuota, payload.YouTubeSearches, payload.PlaylistInserts)
 
 	// Call the analytics update service method
 	err := p.converterService.UpdateUserAnalytics(ctx, payload.UserID, payload.SpotifyType, payload.IsSuccess,
 		payload.TrackCount, payload.SuccessCount, payload.FailureCount, payload.CountsAgainstQuota,
-		payload.YouTubeSearches, payload.PlaylistInserts)
+		payload.YouTubeSearches, payload.PlaylistInserts, payload.GoogleAccountEmail)
 	if err != nil {
 		log.Printf("Analytics update failed: %v", err)
 		return fmt.Errorf("analytics update failed: %w", err)

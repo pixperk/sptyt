@@ -98,17 +98,23 @@ func (qt *QuotaTracker) ConsumeQuota(ctx context.Context, cost int) error {
 
 // consumeQuotaRedis uses Redis for quota tracking (multi-server support)
 func (qt *QuotaTracker) consumeQuotaRedis(ctx context.Context, cost int) error {
-	// Increment quota usage
-	newQuota, err := qt.redisClient.IncrBy(ctx, redisQuotaKey, int64(cost)).Result()
-	if err != nil {
+	// Check current quota before incrementing
+	currentQuota, err := qt.redisClient.Get(ctx, redisQuotaKey).Int()
+	if err != nil && err != redis.Nil {
 		log.Printf("YouTube quota tracking error (falling back to local): %v", err)
 		return qt.consumeQuotaLocal(cost)
 	}
 
-	// Check if exceeded
-	if newQuota > int64(qt.dailyLimit) {
-		remaining := qt.dailyLimit - int(newQuota-int64(cost))
-		return fmt.Errorf("YouTube API quota exceeded: used %d/%d units (needed %d more)", newQuota-int64(cost), qt.dailyLimit, cost-remaining)
+	// Check if we would exceed the limit
+	if currentQuota+cost > qt.dailyLimit {
+		return fmt.Errorf("YouTube API quota exceeded: used %d/%d units (need %d more)", currentQuota, qt.dailyLimit, cost)
+	}
+
+	// Increment quota usage
+	_, err = qt.redisClient.IncrBy(ctx, redisQuotaKey, int64(cost)).Result()
+	if err != nil {
+		log.Printf("YouTube quota tracking error (falling back to local): %v", err)
+		return qt.consumeQuotaLocal(cost)
 	}
 
 	return nil

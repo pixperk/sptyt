@@ -274,5 +274,22 @@ func RunMigrations(db *bun.DB) {
 		log.Printf("Warning: Failed to add soft delete index: %v", err)
 	}
 
+	// Create youtube_account_quotas table for per-Google-account quota tracking
+	_, err = db.NewCreateTable().
+		Model((*models.YouTubeAccountQuota)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create youtube_account_quotas table: %v", err)
+	}
+
+	// Create index for youtube_account_quotas
+	_, err = db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_youtube_account_quotas_email ON youtube_account_quotas(account_email);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create youtube_account_quotas indexes: %v", err)
+	}
+
 	log.Println("Database migrations completed successfully")
 }

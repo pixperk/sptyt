@@ -143,6 +143,7 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		YouTubeAccessToken:  youtubeToken.AccessToken,
 		YouTubePlaylistName: req.YouTubePlaylistName,
 		UseLyricVideos:      req.UseLyricVideos,
+		GoogleAccountEmail:  youtubeToken.AccountEmail,
 	}
 
 	// Enqueue task with Asynq
