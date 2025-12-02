@@ -20,6 +20,16 @@ type CachedTrack struct {
 	Artists []string `json:"artists"`
 }
 
+// CachedTrackDetails stores complete track information to avoid API calls
+type CachedTrackDetails struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Artists    []string `json:"artists"`
+	CoverImage string   `json:"cover_image"`
+	Duration   int      `json:"duration_ms"`
+	SpotifyURL string   `json:"spotify_url"`
+}
+
 type CachedRedirect struct {
 	URL string `json:"url"`
 }
@@ -56,6 +66,33 @@ func (r *RedisCache) GetTrack(ctx context.Context, trackID string) (*CachedTrack
 
 func (r *RedisCache) SetTrack(ctx context.Context, trackID string, track *CachedTrack, ttl time.Duration) error {
 	key := "track:" + trackID
+	data, err := json.Marshal(track)
+	if err != nil {
+		return err
+	}
+
+	return r.client.Set(ctx, key, data, ttl).Err()
+}
+
+// GetTrackDetails retrieves complete track details from cache
+func (r *RedisCache) GetTrackDetails(ctx context.Context, trackID string) (*CachedTrackDetails, error) {
+	key := "track:details:" + trackID
+	val, err := r.client.Get(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var track CachedTrackDetails
+	if err := json.Unmarshal([]byte(val), &track); err != nil {
+		return nil, err
+	}
+
+	return &track, nil
+}
+
+// SetTrackDetails caches complete track details
+func (r *RedisCache) SetTrackDetails(ctx context.Context, trackID string, track *CachedTrackDetails, ttl time.Duration) error {
+	key := "track:details:" + trackID
 	data, err := json.Marshal(track)
 	if err != nil {
 		return err

@@ -621,6 +621,7 @@ func (h *CustomLinkHandler) VerifyLinkPassword(c echo.Context) error {
 }
 
 // GetSongElementData fetches element data for a song from Spotify and derives platform links
+// Caches complete track details and derived URLs to reduce API calls
 func (h *CustomLinkHandler) GetSongElementData(c echo.Context) error {
 	_, ok := auth.GetClerkUserID(c)
 	if !ok {
@@ -641,37 +642,108 @@ func (h *CustomLinkHandler) GetSongElementData(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Spotify URL")
 	}
 
-	// Fetch track details from Spotify
-	trackDetails, err := h.spotifyClient.GetTrackDetails(ctx, trackID)
-	if err != nil {
-		log.Printf("Failed to fetch track details: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch track details")
+	var trackName string
+	var trackArtists []string
+	var trackCoverImage string
+	var trackDuration int
+	var trackSpotifyURL string
+	cacheHit := false
+
+	// Check cache for complete track details first
+	if h.cache != nil {
+		if cached, err := h.cache.GetTrackDetails(ctx, trackID); err == nil {
+			trackName = cached.Name
+			trackArtists = cached.Artists
+			trackCoverImage = cached.CoverImage
+			trackDuration = cached.Duration
+			trackSpotifyURL = cached.SpotifyURL
+			cacheHit = true
+		}
+	}
+
+	// Fetch track details from Spotify only if not cached
+	if !cacheHit {
+		trackDetails, err := h.spotifyClient.GetTrackDetails(ctx, trackID)
+		if err != nil {
+			log.Printf("Failed to fetch track details: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch track details")
+		}
+		trackName = trackDetails.Name
+		trackArtists = trackDetails.Artists
+		trackCoverImage = trackDetails.CoverImage
+		trackDuration = trackDetails.Duration
+		trackSpotifyURL = trackDetails.SpotifyURL
+
+		// Cache complete track details (24 hours)
+		if h.cache != nil {
+			_ = h.cache.SetTrackDetails(ctx, trackID, &cache.CachedTrackDetails{
+				ID:         trackID,
+				Name:       trackName,
+				Artists:    trackArtists,
+				CoverImage: trackCoverImage,
+				Duration:   trackDuration,
+				SpotifyURL: trackSpotifyURL,
+			}, 24*time.Hour)
+		}
 	}
 
 	// Get primary artist (first one)
 	primaryArtist := ""
-	if len(trackDetails.Artists) > 0 {
-		primaryArtist = trackDetails.Artists[0]
+	if len(trackArtists) > 0 {
+		primaryArtist = trackArtists[0]
 	}
 
-	// Search for YouTube music video
-	youtubeURL, _ := h.youtubeClient.SearchOfficialMV(ctx, trackDetails.Name, primaryArtist)
+	// Check cache for YouTube MV URL
+	var youtubeURL string
+	if h.cache != nil {
+		if cached, err := h.cache.GetYouTubeMVURL(ctx, trackID); err == nil {
+			youtubeURL = cached
+		}
+	}
+	if youtubeURL == "" {
+		youtubeURL, _ = h.youtubeClient.SearchOfficialMV(ctx, trackName, primaryArtist)
+		if h.cache != nil && youtubeURL != "" {
+			_ = h.cache.SetYouTubeMVURL(ctx, trackID, youtubeURL, 24*time.Hour)
+		}
+	}
 
-	// Search for YouTube lyric video
-	youtubeLyricURL, _ := h.youtubeClient.SearchLyricVideo(ctx, trackDetails.Name, primaryArtist)
+	// Check cache for YouTube Lyric URL
+	var youtubeLyricURL string
+	if h.cache != nil {
+		if cached, err := h.cache.GetYouTubeLyricsURL(ctx, trackID); err == nil {
+			youtubeLyricURL = cached
+		}
+	}
+	if youtubeLyricURL == "" {
+		youtubeLyricURL, _ = h.youtubeClient.SearchLyricVideo(ctx, trackName, primaryArtist)
+		if h.cache != nil && youtubeLyricURL != "" {
+			_ = h.cache.SetYouTubeLyricsURL(ctx, trackID, youtubeLyricURL, 24*time.Hour)
+		}
+	}
 
-	// Search for Genius lyrics
-	geniusURL, _ := h.geniusClient.SearchLyrics(ctx, trackDetails.Name, primaryArtist)
+	// Check cache for Genius URL
+	var geniusURL string
+	if h.cache != nil {
+		if cached, err := h.cache.GetGeniusURL(ctx, trackID); err == nil {
+			geniusURL = cached
+		}
+	}
+	if geniusURL == "" {
+		geniusURL, _ = h.geniusClient.SearchLyrics(ctx, trackName, primaryArtist)
+		if h.cache != nil && geniusURL != "" {
+			_ = h.cache.SetGeniusURL(ctx, trackID, geniusURL, 24*time.Hour)
+		}
+	}
 
 	// Format duration
-	durationStr := formatDuration(trackDetails.Duration)
+	durationStr := formatDuration(trackDuration)
 
 	elementData := models.ElementData{
-		Title:            trackDetails.Name,
-		Artists:          strings.Join(trackDetails.Artists, ", "),
-		CoverImage:       trackDetails.CoverImage,
+		Title:            trackName,
+		Artists:          strings.Join(trackArtists, ", "),
+		CoverImage:       trackCoverImage,
 		Duration:         durationStr,
-		SpotifyURL:       trackDetails.SpotifyURL,
+		SpotifyURL:       trackSpotifyURL,
 		YouTubeURL:       youtubeURL,
 		YouTubeLyricURL:  youtubeLyricURL,
 		GeniusURL:        geniusURL,
