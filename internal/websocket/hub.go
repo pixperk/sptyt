@@ -18,13 +18,15 @@ type ProgressEvent struct {
 
 // ProgressData contains detailed progress information
 type ProgressData struct {
-	TotalTracks      int    `json:"total_tracks"`
-	ProcessedTracks  int    `json:"processed_tracks"`
-	SuccessCount     int    `json:"success_count"`
-	FailureCount     int    `json:"failure_count"`
-	CurrentTrack     string `json:"current_track,omitempty"`
-	YouTubePlaylistID string `json:"youtube_playlist_id,omitempty"`
+	TotalTracks        int    `json:"total_tracks"`
+	ProcessedTracks    int    `json:"processed_tracks"`
+	SuccessCount       int    `json:"success_count"`
+	FailureCount       int    `json:"failure_count"`
+	CurrentTrack       string `json:"current_track,omitempty"`
+	YouTubePlaylistID  string `json:"youtube_playlist_id,omitempty"`
 	YouTubePlaylistURL string `json:"youtube_playlist_url,omitempty"`
+	Error              string `json:"error,omitempty"`         // Error code (e.g., "quota_exceeded", "wrong_account")
+	ErrorMessage       string `json:"error_message,omitempty"` // Human-readable error message
 }
 
 // Client represents a WebSocket client connection

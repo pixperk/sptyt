@@ -291,5 +291,16 @@ func RunMigrations(db *bun.DB) {
 		log.Fatalf("Failed to create youtube_account_quotas indexes: %v", err)
 	}
 
+	// Add google_account_email column to playlist_conversions for retry validation
+	_, err = db.Exec(`
+		ALTER TABLE playlist_conversions
+		ADD COLUMN IF NOT EXISTS google_account_email TEXT;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to add google_account_email column: %v", err)
+	} else {
+		log.Println("Added google_account_email column to playlist_conversions table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }

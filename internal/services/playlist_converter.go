@@ -190,6 +190,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	conversion.YouTubePlaylistID = youtubePlaylistID
 	conversion.YouTubePlaylistURL = fmt.Sprintf("https://www.youtube.com/playlist?list=%s", youtubePlaylistID)
+	conversion.GoogleAccountEmail = job.GoogleAccountEmail
 
 	// Send progress: YouTube playlist created
 	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "progress", "YouTube playlist created", ws.ProgressData{
@@ -266,7 +267,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	_, err = s.db.NewUpdate().
 		Model(conversion).
-		Column("playlist_name", "track_count", "success_count", "failure_count", "you_tube_playlist_id", "you_tube_playlist_url", "spotify_cover_image", "conversion_log", "status", "updated_at", "completed_at").
+		Column("playlist_name", "track_count", "success_count", "failure_count", "you_tube_playlist_id", "you_tube_playlist_url", "spotify_cover_image", "conversion_log", "status", "updated_at", "completed_at", "google_account_email").
 		Where("id = ?", conversion.ID).
 		Exec(ctx)
 
@@ -747,6 +748,26 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 		return fmt.Errorf("failed to get conversion record: %w", err)
 	}
 
+	// Check quota before starting
+	var accountQuota models.YouTubeAccountQuota
+	quotaErr := s.db.NewSelect().
+		Model(&accountQuota).
+		Where("account_email = ?", job.GoogleAccountEmail).
+		Scan(ctx)
+
+	if quotaErr == nil && !accountQuota.NeedsQuotaReset() && !accountQuota.CanAffordSearch() {
+		// Quota exceeded - fail immediately
+		s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_failed", "YouTube API quota exceeded", ws.ProgressData{
+			TotalTracks:     len(job.FailedTracks),
+			ProcessedTracks: 0,
+			SuccessCount:    0,
+			FailureCount:    len(job.FailedTracks),
+			Error:           "quota_exceeded",
+			ErrorMessage:    "YouTube API quota exceeded for today. Please try again after midnight Pacific Time.",
+		})
+		return fmt.Errorf("quota exceeded")
+	}
+
 	// Send started event
 	s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_started", "Retrying failed tracks", ws.ProgressData{
 		TotalTracks:     len(job.FailedTracks),
@@ -759,6 +780,8 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 	var videoIDsToAdd []string
 	updatedLogs := make([]models.TrackConversionLog, len(conversion.ConversionLog))
 	copy(updatedLogs, conversion.ConversionLog)
+	processedCount := 0
+	quotaExhausted := false
 
 	// Create a map for quick lookup of failed track indices
 	failedTrackMap := make(map[string]int) // SpotifyTrackID -> index in job.FailedTracks
@@ -771,6 +794,8 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 			continue // Skip tracks that weren't requested for retry
 		}
 
+		processedCount++
+
 		// Create a PlaylistTrack from the log entry for matching
 		track := &spotify.PlaylistTrack{
 			ID:      logEntry.SpotifyTrackID,
@@ -780,6 +805,24 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 
 		result := s.matchTrackToYouTube(ctx, track, job.UseLyricVideos, job.YouTubeAccessToken)
 		totalSearches += result.SearchCount
+
+		// Check if we hit a quota error (403 quotaExceeded)
+		if result.Error != nil && isYouTubeAPIError(result.Error) {
+			errStr := strings.ToLower(result.Error.Error())
+			if strings.Contains(errStr, "quota") || strings.Contains(errStr, "403") {
+				quotaExhausted = true
+				// Send quota exceeded message
+				s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_failed", "YouTube API quota exceeded", ws.ProgressData{
+					TotalTracks:     len(job.FailedTracks),
+					ProcessedTracks: processedCount,
+					SuccessCount:    successfulRetries,
+					FailureCount:    len(job.FailedTracks) - successfulRetries,
+					Error:           "quota_exceeded",
+					ErrorMessage:    "YouTube API quota exceeded. Retry stopped. Successfully retried tracks have been saved.",
+				})
+				break
+			}
+		}
 
 		if result.Error == nil && result.VideoID != "" {
 			updatedLogs[i].Status = "success"
@@ -793,25 +836,33 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 
 		// Send progress update
 		s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_progress",
-			fmt.Sprintf("Retrying: %d/%d", i+1, len(job.FailedTracks)), ws.ProgressData{
+			fmt.Sprintf("Retrying: %d/%d", processedCount, len(job.FailedTracks)), ws.ProgressData{
 				TotalTracks:     len(job.FailedTracks),
-				ProcessedTracks: i + 1,
+				ProcessedTracks: processedCount,
 				CurrentTrack:    fmt.Sprintf("%s - %s", logEntry.SpotifyTrackName, logEntry.SpotifyArtists),
 			})
 	}
 
 	// Add matched videos to YouTube playlist
 	playlistInserts := 0
-	if len(videoIDsToAdd) > 0 {
+	if len(videoIDsToAdd) > 0 && !quotaExhausted {
 		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, job.YouTubeAccessToken, job.YouTubePlaylistID, videoIDsToAdd)
 		playlistInserts = len(videoIDsToAdd) - len(addErrors)
 
 		// Update log entries for any errors adding videos
-		for videoID, err := range addErrors {
-			for i := range updatedLogs {
-				if updatedLogs[i].YouTubeVideoID == videoID {
-					updatedLogs[i].Status = "error"
-					updatedLogs[i].Error = fmt.Sprintf("Failed to add to playlist: %v", err)
+		for videoID, addErr := range addErrors {
+			// Check if this is a quota error
+			if isYouTubeAPIError(addErr) {
+				errStr := strings.ToLower(addErr.Error())
+				if strings.Contains(errStr, "quota") || strings.Contains(errStr, "403") {
+					quotaExhausted = true
+				}
+			}
+
+			for j := range updatedLogs {
+				if updatedLogs[j].YouTubeVideoID == videoID {
+					updatedLogs[j].Status = "error"
+					updatedLogs[j].Error = fmt.Sprintf("Failed to add to playlist: %v", addErr)
 					successfulRetries--
 				}
 			}
@@ -821,8 +872,8 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 	// Recalculate success/failure counts
 	newSuccessCount := 0
 	newFailureCount := 0
-	for _, log := range updatedLogs {
-		if log.Status == "success" {
+	for _, logItem := range updatedLogs {
+		if logItem.Status == "success" {
 			newSuccessCount++
 		} else {
 			newFailureCount++
@@ -848,20 +899,32 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 	// Update analytics: only update YouTube quota usage (searches + inserts)
 	// Retries don't count as new conversions, but they use quota
 	if totalSearches > 0 || playlistInserts > 0 {
-		if err := s.updateYouTubeAccountQuota(ctx, job.GoogleAccountEmail, totalSearches, playlistInserts); err != nil {
-			log.Printf("Warning: Failed to update YouTube account quota for retry: %v", err)
+		if quotaUpdateErr := s.updateYouTubeAccountQuota(ctx, job.GoogleAccountEmail, totalSearches, playlistInserts); quotaUpdateErr != nil {
+			log.Printf("Warning: Failed to update YouTube account quota for retry: %v", quotaUpdateErr)
 		}
 	}
 
-	// Send completed event
-	s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_completed", "Retry completed", ws.ProgressData{
-		TotalTracks:        len(job.FailedTracks),
-		ProcessedTracks:    len(job.FailedTracks),
-		SuccessCount:       successfulRetries,
-		FailureCount:       len(job.FailedTracks) - successfulRetries,
-		YouTubePlaylistID:  conversion.YouTubePlaylistID,
-		YouTubePlaylistURL: conversion.YouTubePlaylistURL,
-	})
+	// Send completed or partial success event (if not already sent quota failure)
+	if !quotaExhausted {
+		eventType := "retry_completed"
+		message := "Retry completed"
+		if successfulRetries == 0 && len(job.FailedTracks) > 0 {
+			message = "Retry completed - no tracks could be matched"
+		} else if successfulRetries == len(job.FailedTracks) {
+			message = "All tracks retried successfully!"
+		} else {
+			message = fmt.Sprintf("Retry completed - %d of %d tracks succeeded", successfulRetries, len(job.FailedTracks))
+		}
+
+		s.publishProgress(job.ClerkUserID, job.ConversionID, eventType, message, ws.ProgressData{
+			TotalTracks:        len(job.FailedTracks),
+			ProcessedTracks:    len(job.FailedTracks),
+			SuccessCount:       successfulRetries,
+			FailureCount:       len(job.FailedTracks) - successfulRetries,
+			YouTubePlaylistID:  conversion.YouTubePlaylistID,
+			YouTubePlaylistURL: conversion.YouTubePlaylistURL,
+		})
+	}
 
 	return nil
 }

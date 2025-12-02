@@ -479,6 +479,37 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "YouTube not connected. Please connect your YouTube account first.")
 	}
 
+	// Verify same YouTube account is connected (if we know the original account)
+	if conversion.GoogleAccountEmail != "" && youtubeToken.AccountEmail != conversion.GoogleAccountEmail {
+		return c.JSON(http.StatusForbidden, map[string]interface{}{
+			"error":            "wrong_youtube_account",
+			"message":          "You must use the same YouTube account that created the playlist",
+			"required_account": conversion.GoogleAccountEmail,
+			"current_account":  youtubeToken.AccountEmail,
+		})
+	}
+
+	// Check YouTube quota before retry
+	var accountQuota models.YouTubeAccountQuota
+	quotaErr := h.db.NewSelect().
+		Model(&accountQuota).
+		Where("account_email = ?", youtubeToken.AccountEmail).
+		Scan(ctx)
+
+	if quotaErr == nil && !accountQuota.NeedsQuotaReset() {
+		// Check if there's enough quota for at least one search
+		if !accountQuota.CanAffordSearch() {
+			return c.JSON(http.StatusTooManyRequests, map[string]interface{}{
+				"error":           "quota_exceeded",
+				"message":         "YouTube API quota exceeded for today. Please try again after midnight Pacific Time.",
+				"quota_used":      accountQuota.GetDailyQuotaUsed(),
+				"quota_limit":     models.YouTubeQuotaDailyLimit,
+				"quota_remaining": 0,
+				"resets_at":       "midnight Pacific Time",
+			})
+		}
+	}
+
 	// Refresh token if needed
 	if time.Until(youtubeToken.ExpiresAt) < 5*time.Minute {
 		refreshedToken, err := h.refreshYouTubeToken(ctx, &youtubeToken)

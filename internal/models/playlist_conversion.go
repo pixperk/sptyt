@@ -23,10 +23,11 @@ type PlaylistConversion struct {
 	SuccessCount      int    `bun:",notnull,default:0" json:"success_count"`
 	FailureCount      int    `bun:",notnull,default:0" json:"failure_count"`
 
-	Status        string                   `bun:",notnull,default:'pending'" json:"status"` // pending, processing, completed, failed
-	ConversionLog []TrackConversionLog     `bun:"type:jsonb" json:"conversion_log,omitempty"`
-	ErrorMessage  string                   `bun:"" json:"error_message,omitempty"`
-	CountsAgainstQuota bool                `bun:",default:true" json:"counts_against_quota"` // false if failed due to API errors
+	Status             string               `bun:",notnull,default:'pending'" json:"status"` // pending, processing, completed, failed
+	ConversionLog      []TrackConversionLog `bun:"type:jsonb" json:"conversion_log,omitempty"`
+	ErrorMessage       string               `bun:"" json:"error_message,omitempty"`
+	CountsAgainstQuota bool                 `bun:",default:true" json:"counts_against_quota"`     // false if failed due to API errors
+	GoogleAccountEmail string               `bun:"" json:"google_account_email,omitempty"` // Google account used to create YouTube playlist
 
 	CreatedAt   time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt   time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
