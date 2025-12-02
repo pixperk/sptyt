@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -64,7 +63,6 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 		Scan(ctx)
 
 	if err != nil {
-		log.Printf("ConvertPlaylist: Failed to get user: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
 	}
 
@@ -81,10 +79,8 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 
 	// Refresh token if expired or about to expire (within 5 minutes)
 	if time.Until(youtubeToken.ExpiresAt) < 5*time.Minute {
-		log.Printf("ConvertPlaylist: Refreshing YouTube token for user %s (expires in %v)", user.ID, time.Until(youtubeToken.ExpiresAt))
 		refreshedToken, err := h.refreshYouTubeToken(ctx, &youtubeToken)
 		if err != nil {
-			log.Printf("ConvertPlaylist: Failed to refresh YouTube token: %v", err)
 			return echo.NewHTTPError(http.StatusBadRequest, "YouTube token expired. Please reconnect your YouTube account.")
 		}
 		youtubeToken = *refreshedToken
@@ -105,8 +101,6 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Spotify playlist/album URL")
 	}
-
-	log.Printf("ConvertPlaylist: User %s converting %s %s", user.ID, spotifyType, spotifyID)
 
 	// Fetch playlist/album to check track count BEFORE starting conversion
 	spotifyPlaylist, err := h.converterService.FetchPlaylistInfo(ctx, spotifyID, spotifyType)
@@ -135,7 +129,6 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 	// Save initial conversion record
 	_, err = h.db.NewInsert().Model(conversion).Exec(ctx)
 	if err != nil {
-		log.Printf("ConvertPlaylist: Failed to create conversion record: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create conversion record")
 	}
 
@@ -155,11 +148,8 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 	// Enqueue task with Asynq
 	err = h.taskClient.EnqueuePlaylistConversion(payload)
 	if err != nil {
-		log.Printf("ConvertPlaylist: Failed to enqueue task: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start conversion")
 	}
-
-	log.Printf("ConvertPlaylist: Enqueued conversion task %s for user %s", conversion.ID, user.ID)
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
 		"message":       "Playlist conversion started",
@@ -234,7 +224,6 @@ func (h *PlaylistHandler) GetUserConversions(c echo.Context) error {
 	// Get conversions
 	conversions, err := h.converterService.GetUserConversions(ctx, user.ID, 20) // Limit to 20
 	if err != nil {
-		log.Printf("GetUserConversions: Failed to get conversions: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get conversions")
 	}
 
@@ -298,7 +287,6 @@ func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
 		Count(ctx)
 
 	if err != nil {
-		log.Printf("GetDetailedUserConversions: Failed to count conversions: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get conversions")
 	}
 
@@ -314,7 +302,6 @@ func (h *PlaylistHandler) GetDetailedUserConversions(c echo.Context) error {
 		Scan(ctx)
 
 	if err != nil {
-		log.Printf("GetDetailedUserConversions: Failed to get conversions: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get conversions")
 	}
 
@@ -422,11 +409,8 @@ func (h *PlaylistHandler) DeleteConversion(c echo.Context) error {
 		Exec(ctx)
 
 	if err != nil {
-		log.Printf("DeleteConversion: Failed to delete conversion: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to delete conversion")
 	}
-
-	log.Printf("DeleteConversion: User %s soft-deleted conversion %s", user.ID, conversionID)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -486,7 +470,6 @@ func (h *PlaylistHandler) refreshYouTubeToken(ctx context.Context, token *models
 		return nil, fmt.Errorf("failed to update token in database: %w", err)
 	}
 
-	log.Printf("refreshYouTubeToken: Successfully refreshed token for user %s (new expiry: %v)", token.UserID, token.ExpiresAt)
 	return token, nil
 }
 

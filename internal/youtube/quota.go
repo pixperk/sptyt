@@ -83,7 +83,6 @@ func (qt *QuotaTracker) resetQuota(ctx context.Context) {
 	tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
 	qt.redisClient.Set(ctx, redisQuotaResetKey, tomorrow.Format(time.RFC3339), 24*time.Hour)
 
-	log.Printf("YouTube quota reset. Next reset: %s", tomorrow.Format(time.RFC3339))
 }
 
 // ConsumeQuota records quota usage and returns error if limit exceeded
@@ -112,7 +111,6 @@ func (qt *QuotaTracker) consumeQuotaRedis(ctx context.Context, cost int) error {
 		return fmt.Errorf("YouTube API quota exceeded: used %d/%d units (needed %d more)", newQuota-int64(cost), qt.dailyLimit, cost-remaining)
 	}
 
-	log.Printf("YouTube quota consumed: %d units (total: %d/%d)", cost, newQuota, qt.dailyLimit)
 	return nil
 }
 
@@ -126,7 +124,6 @@ func (qt *QuotaTracker) consumeQuotaLocal(cost int) error {
 	}
 
 	qt.localQuota += cost
-	log.Printf("YouTube quota consumed (local): %d units (total: %d/%d)", cost, qt.localQuota, qt.dailyLimit)
 	return nil
 }
 

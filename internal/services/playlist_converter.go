@@ -106,8 +106,6 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 		return nil, fmt.Errorf("failed to get conversion record: %w", err)
 	}
 
-	log.Printf("ConversionService: Starting conversion %s for user %s", conversion.ID, job.UserID)
-
 	// Send started event
 	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "started", "Conversion started", nil)
 
@@ -153,8 +151,6 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 		conversion.SpotifyCoverImage = playlist.Images[0].URL
 	}
 
-	log.Printf("ConversionService: Fetched %d tracks from Spotify %s", len(tracks), job.SpotifyType)
-
 	// Send progress: tracks fetched
 	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "progress", "Fetched tracks from Spotify", ws.ProgressData{
 		TotalTracks:     len(tracks),
@@ -176,17 +172,11 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 		s.updateConversionStatusWithQuotaFlag(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err), countsAgainstQuota)
 		s.publishProgress(job.ClerkUserID, conversion.ID.String(), "failed", fmt.Sprintf("Failed to create YouTube playlist: %v", err), nil)
 
-		if !countsAgainstQuota {
-			log.Printf("ConversionService: YouTube API error detected - conversion %s will NOT count against quota", conversion.ID)
-		}
-
 		return nil, fmt.Errorf("failed to create YouTube playlist: %w", err)
 	}
 
 	conversion.YouTubePlaylistID = youtubePlaylistID
 	conversion.YouTubePlaylistURL = fmt.Sprintf("https://www.youtube.com/playlist?list=%s", youtubePlaylistID)
-
-	log.Printf("ConversionService: Created YouTube playlist: %s", youtubePlaylistID)
 
 	// Send progress: YouTube playlist created
 	s.publishProgress(job.ClerkUserID, conversion.ID.String(), "progress", "YouTube playlist created", ws.ProgressData{
@@ -234,21 +224,16 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 
 	conversion.ConversionLog = conversionLogs
 
-	log.Printf("ConversionService: Matched %d/%d tracks successfully", conversion.SuccessCount, conversion.TrackCount)
-
 	// Add videos to YouTube playlist in batches with rate limiting
 	playlistInserts := 0 // Track successful playlist insert API calls
 	if len(videoIDs) > 0 {
-		log.Printf("ConversionService: Adding %d videos to YouTube playlist", len(videoIDs))
 		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, job.YouTubeAccessToken, youtubePlaylistID, videoIDs)
 
 		// Calculate successful inserts (each video added = 1 playlist insert API call)
 		playlistInserts = len(videoIDs) - len(addErrors)
 
-		// Log any errors adding videos
+		// Update log entries for any errors adding videos
 		for videoID, err := range addErrors {
-			log.Printf("ConversionService: Failed to add video %s: %v", videoID, err)
-			// Update the corresponding log entry
 			for i := range conversionLogs {
 				if conversionLogs[i].YouTubeVideoID == videoID {
 					conversionLogs[i].Status = "error"
@@ -266,20 +251,16 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	completedAt := time.Now()
 	conversion.CompletedAt = &completedAt
 
-	result, err := s.db.NewUpdate().
+	_, err = s.db.NewUpdate().
 		Model(conversion).
 		Column("playlist_name", "track_count", "success_count", "failure_count", "you_tube_playlist_id", "you_tube_playlist_url", "spotify_cover_image", "conversion_log", "status", "updated_at", "completed_at").
 		Where("id = ?", conversion.ID).
 		Exec(ctx)
 
 	if err != nil {
-		log.Printf("ConversionService: CRITICAL - Failed to update conversion record: %v", err)
+		log.Printf("ConversionService: Failed to update conversion record: %v", err)
 		return nil, fmt.Errorf("failed to save conversion results: %w", err)
 	}
-
-	rowsAffected, _ := result.RowsAffected()
-	log.Printf("ConversionService: Conversion %s completed: %d success, %d failed, %d searches, %d inserts (DB rows affected: %d)",
-		conversion.ID, conversion.SuccessCount, conversion.FailureCount, totalSearches, playlistInserts, rowsAffected)
 
 	// Enqueue analytics update task (async) - includes YouTube quota tracking
 	isSuccess := conversion.Status == "completed"

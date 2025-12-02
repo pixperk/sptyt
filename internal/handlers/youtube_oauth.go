@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,7 +68,6 @@ func (h *YouTubeOAuthHandler) Authorize(c echo.Context) error {
 	// Generate state token
 	state, err := generateState()
 	if err != nil {
-		log.Printf("Failed to generate state: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to generate state")
 	}
 
@@ -78,7 +76,6 @@ func (h *YouTubeOAuthHandler) Authorize(c echo.Context) error {
 	ctx, cancel := database.NewQueryContext()
 	defer cancel()
 	if err := h.cache.Set(ctx, cacheKey, clerkUserID, 10*time.Minute); err != nil {
-		log.Printf("Failed to store state in cache: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to store state")
 	}
 
@@ -92,8 +89,6 @@ func (h *YouTubeOAuthHandler) Authorize(c echo.Context) error {
 		"state":         {state},
 		"prompt":        {"consent"}, // Force consent to get refresh token
 	}.Encode()
-
-	log.Printf("YouTubeOAuth: Redirecting user %s to authorization URL", clerkUserID)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"authorization_url": authURL,
@@ -120,7 +115,6 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	}
 
 	if errorParam != "" {
-		log.Printf("YouTubeOAuth: Authorization error: %s", errorParam)
 		redirectURL := fmt.Sprintf("%s/dashboard?youtube_auth=error&error=%s", frontendURL, url.QueryEscape(errorParam))
 		return c.Redirect(http.StatusFound, redirectURL)
 	}
@@ -136,31 +130,22 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	cacheKey := fmt.Sprintf("oauth_state:%s", state)
 	clerkUserID, err := h.cache.Get(ctx, cacheKey)
 	if err != nil {
-		log.Printf("YouTubeOAuth: Invalid or expired state: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid or expired state")
 	}
 
 	// Delete state from cache (one-time use)
 	h.cache.Delete(ctx, cacheKey)
 
-	log.Printf("YouTubeOAuth: Processing callback for user: %s", clerkUserID)
-
 	// Exchange authorization code for tokens
 	tokenResp, err := h.exchangeCodeForToken(ctx, code)
 	if err != nil {
-		log.Printf("YouTubeOAuth: Failed to exchange code: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to exchange authorization code")
-	}
-
-	if tokenResp.RefreshToken == "" {
-		log.Printf("YouTubeOAuth: Warning - no refresh token received")
 	}
 
 	// Fetch Google user info
 	userInfo, err := h.fetchGoogleUserInfo(ctx, tokenResp.AccessToken)
 	if err != nil {
-		log.Printf("YouTubeOAuth: Warning - failed to fetch user info: %v", err)
-		// Continue anyway, user info is optional - set to empty struct
+		// Continue anyway, user info is optional
 		userInfo = &googleUserInfo{}
 	}
 
@@ -172,7 +157,6 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 		Scan(ctx)
 
 	if err != nil {
-		log.Printf("YouTubeOAuth: Failed to get user: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
 	}
 
@@ -209,11 +193,8 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 		Exec(ctx)
 
 	if err != nil {
-		log.Printf("YouTubeOAuth: Failed to save token: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save authorization")
 	}
-
-	log.Printf("YouTubeOAuth: Successfully saved OAuth token for user %s", user.ID)
 
 	// Redirect to frontend with success indicator
 	redirectURL := fmt.Sprintf("%s/dashboard?youtube_auth=success", frontendURL)
@@ -346,7 +327,6 @@ func (h *YouTubeOAuthHandler) DisconnectYouTube(c echo.Context) error {
 		Scan(ctx)
 
 	if err != nil {
-		log.Printf("DisconnectYouTube: Failed to get user: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
 	}
 
@@ -357,7 +337,6 @@ func (h *YouTubeOAuthHandler) DisconnectYouTube(c echo.Context) error {
 		Exec(ctx)
 
 	if err != nil {
-		log.Printf("DisconnectYouTube: Failed to delete token: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to disconnect YouTube")
 	}
 
@@ -369,8 +348,6 @@ func (h *YouTubeOAuthHandler) DisconnectYouTube(c echo.Context) error {
 			"message": "No YouTube connection found",
 		})
 	}
-
-	log.Printf("DisconnectYouTube: Successfully disconnected YouTube for user %s", user.ID)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,

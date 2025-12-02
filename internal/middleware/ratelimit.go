@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -145,14 +144,8 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 			current, err := rl.client.Incr(ctx, key).Result()
 			if err != nil {
 				// Redis is down - fall back to in-memory rate limiting
-				log.Printf("CRITICAL: Redis unavailable, using in-memory rate limiting (stricter: %d req/min): %v", rl.fallbackLimit, err)
-
-				// Track fallback mode for monitoring
 				rl.fallbackMu2.Lock()
-				if !rl.inFallback {
-					rl.inFallback = true
-					log.Printf("ALERT: Rate limiter entered FALLBACK MODE - stricter limits active (%d req/min per IP)", rl.fallbackLimit)
-				}
+				rl.inFallback = true
 				rl.fallbackMu2.Unlock()
 
 				// Use in-memory rate limiting with stricter limits
@@ -176,10 +169,7 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 
 			// Redis is working - reset fallback flag if needed
 			rl.fallbackMu2.Lock()
-			if rl.inFallback {
-				rl.inFallback = false
-				log.Printf("INFO: Rate limiter recovered from fallback mode - Redis operational")
-			}
+			rl.inFallback = false
 			rl.fallbackMu2.Unlock()
 
 			if current == 1 {

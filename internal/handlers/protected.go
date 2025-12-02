@@ -139,14 +139,10 @@ func (ph *ProtectedHandler) Me(c echo.Context) error {
 
 // CreateCheckoutSession creates a DodoPay checkout session for subscription
 func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
-	log.Println("CreateCheckoutSession: Starting checkout session creation")
-
 	user, err := ph.GetOrCreateUser(c)
 	if err != nil {
-		log.Printf("CreateCheckoutSession: Failed to get/create user: %v", err)
 		return err
 	}
-	log.Printf("CreateCheckoutSession: User retrieved: %s (email: %s)", user.ID, user.Email)
 
 	// Store user in context
 	c.Set("current_user", user)
@@ -156,10 +152,8 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 		PaymentMethod string `json:"payment_method"` // "card" or "upi"
 	}
 	if err := c.Bind(&requestBody); err != nil {
-		log.Printf("CreateCheckoutSession: Failed to bind request body, using default: %v", err)
 		requestBody.PaymentMethod = "card" // Default to card
 	}
-	log.Printf("CreateCheckoutSession: Payment method: %s", requestBody.PaymentMethod)
 
 	// Get DodoPay configuration
 	dodopayAPIKey := os.Getenv("DODOPAY_API_KEY")
@@ -167,28 +161,19 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 	productID := os.Getenv("DODOPAY_PRODUCT_ID")
 	returnURL := os.Getenv("DODOPAY_RETURN_URL")
 
-	log.Printf("CreateCheckoutSession: Config check - API Key exists: %v, API Host: %s, Product ID exists: %v, Return URL exists: %v",
-		dodopayAPIKey != "", dodopayAPIHost, productID != "", returnURL != "")
-
 	if dodopayAPIKey == "" || productID == "" {
-		log.Println("CreateCheckoutSession: Missing DodoPay configuration")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "Payment system not configured")
 	}
 
 	if returnURL == "" {
 		returnURL = "https://sptyt.xyz/payment/return"
-		log.Printf("CreateCheckoutSession: Using default return URL: %s", returnURL)
 	}
-
-	// Initialize DodoPay client
-	log.Println("CreateCheckoutSession: Initializing DodoPay client")
 
 	var clientOptions []option.RequestOption
 	clientOptions = append(clientOptions, option.WithBearerToken(dodopayAPIKey))
 
 	// Use custom API host if provided
 	if dodopayAPIHost != "" {
-		log.Printf("CreateCheckoutSession: Using custom API host: %s", dodopayAPIHost)
 		clientOptions = append(clientOptions, option.WithBaseURL(dodopayAPIHost))
 	}
 
@@ -210,17 +195,12 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 			dodopayments.PaymentMethodTypesUpiIntent,
 		)
 	}
-	log.Printf("CreateCheckoutSession: Allowed payment methods: %v", allowedPaymentMethods)
 
 	// Create customer name
 	customerName := user.FirstName + " " + user.LastName
 	if customerName == " " {
 		customerName = user.Email
 	}
-	log.Printf("CreateCheckoutSession: Customer name: %s", customerName)
-
-	// Create checkout session with product
-	log.Printf("CreateCheckoutSession: Creating checkout session with product ID: %s", productID)
 	session, err := client.CheckoutSessions.New(ctx, dodopayments.CheckoutSessionNewParams{
 		CheckoutSessionRequest: dodopayments.CheckoutSessionRequestParam{
 			ProductCart: dodopayments.F([]dodopayments.CheckoutSessionRequestProductCartParam{{
@@ -240,8 +220,6 @@ func (ph *ProtectedHandler) CreateCheckoutSession(c echo.Context) error {
 		log.Printf("CreateCheckoutSession: Failed to create checkout session: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create checkout session")
 	}
-
-	log.Printf("CreateCheckoutSession: Success! Session ID: %s, Checkout URL: %s", session.SessionID, session.CheckoutURL)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"checkout_url":   session.CheckoutURL,
@@ -334,9 +312,6 @@ func (ph *ProtectedHandler) PaymentReturn(c echo.Context) error {
 	status := c.QueryParam("status")                  // From DodoPay redirect (e.g., "active")
 	subscriptionID := c.QueryParam("subscription_id") // From DodoPay redirect
 
-	log.Printf("PaymentReturn: session_id=%s, status=%s, subscription_id=%s",
-		sessionID, status, subscriptionID)
-
 	// Get the authenticated user
 	user, err := ph.GetOrCreateUser(c)
 	if err != nil {
@@ -368,9 +343,6 @@ func (ph *ProtectedHandler) PaymentReturn(c echo.Context) error {
 		paymentStatus = "failed"
 		message = "Payment was not completed. Please try again."
 	}
-
-	log.Printf("PaymentReturn: user_id=%s, payment_status=%s, db_subscription_status=%s, subscription_tier=%s",
-		freshUser.ID, paymentStatus, freshUser.SubscriptionStatus, freshUser.SubscriptionTier)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":          paymentStatus,
