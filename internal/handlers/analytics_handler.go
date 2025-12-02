@@ -217,11 +217,11 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 	// Determine user limits
 	var maxPlaylists, maxSongs int
 	if user.IsPremium() {
-		maxPlaylists = 20
+		maxPlaylists = -1 // unlimited
 		maxSongs = 100
 	} else {
-		maxPlaylists = 1
-		maxSongs = 10
+		maxPlaylists = 5
+		maxSongs = 30
 	}
 
 	// Check if analytics exist and are for current month
@@ -293,6 +293,22 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 		quotaRemaining = models.YouTubeQuotaDailyLimit
 	}
 
+	// Handle unlimited playlists (-1) for premium
+	var playlistsRemaining interface{}
+	var usagePercentage float64
+	var canConvert bool
+
+	if maxPlaylists < 0 {
+		// Unlimited
+		playlistsRemaining = "unlimited"
+		usagePercentage = 0
+		canConvert = true
+	} else {
+		playlistsRemaining = maxPlaylists - monthlyConversions
+		usagePercentage = float64(monthlyConversions) / float64(maxPlaylists) * 100
+		canConvert = monthlyConversions < maxPlaylists
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"month":             now.Format("January 2006"),
 		"month_num":         currentMonth,
@@ -305,8 +321,8 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 		},
 		"usage": map[string]interface{}{
 			"playlists_converted": monthlyConversions,
-			"playlists_remaining": maxPlaylists - monthlyConversions,
-			"usage_percentage":    float64(monthlyConversions) / float64(maxPlaylists) * 100,
+			"playlists_remaining": playlistsRemaining,
+			"usage_percentage":    usagePercentage,
 			"total_tracks":        monthlyDetails.TotalTracks,
 			"matched_tracks":      monthlyDetails.MatchedTracks,
 			"failed_tracks":       monthlyDetails.FailedTracks,
@@ -324,6 +340,6 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 			"cost_per_search":    models.YouTubeQuotaCostSearch,
 			"cost_per_insert":    models.YouTubeQuotaCostPlaylistInsert,
 		},
-		"can_convert": monthlyConversions < maxPlaylists,
+		"can_convert": canConvert,
 	})
 }

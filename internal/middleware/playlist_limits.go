@@ -22,12 +22,12 @@ type PlaylistLimits struct {
 
 var (
 	FreeTierLimits = PlaylistLimits{
-		MaxPlaylistsPerMonth: 1,
-		MaxSongsPerPlaylist:  10,
+		MaxPlaylistsPerMonth: 5,
+		MaxSongsPerPlaylist:  30,
 	}
 
 	PremiumTierLimits = PlaylistLimits{
-		MaxPlaylistsPerMonth: 20,
+		MaxPlaylistsPerMonth: -1, // unlimited
 		MaxSongsPerPlaylist:  100,
 	}
 )
@@ -84,7 +84,8 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 				return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to check limits"))
 			}
 
-			if count >= limits.MaxPlaylistsPerMonth {
+			// -1 means unlimited playlists (premium)
+			if limits.MaxPlaylistsPerMonth >= 0 && count >= limits.MaxPlaylistsPerMonth {
 				return errors.ToHTTPError(
 					errors.QuotaExceeded("Monthly conversion limit reached").
 						WithMeta("limit", limits.MaxPlaylistsPerMonth).
