@@ -189,6 +189,7 @@ func main() {
 		api.GET("/playlists/conversions/detailed", playlistHandler.GetDetailedUserConversions)
 		api.GET("/playlists/conversions/:id", playlistHandler.GetConversionStatus)
 		api.DELETE("/playlists/conversions/:id", playlistHandler.DeleteConversion)
+		api.POST("/playlists/conversions/:id/retry", playlistHandler.RetryFailedTracks)
 
 		// Analytics endpoints
 		api.GET("/analytics", analyticsHandler.GetUserAnalytics)

@@ -42,6 +42,7 @@ func NewServer(cfg *config.RedisConfig, converterService *services.PlaylistConve
 	// Register task handlers
 	mux.HandleFunc(TypePlaylistConversion, processor.ProcessPlaylistConversion)
 	mux.HandleFunc(TypeAnalyticsUpdate, processor.ProcessAnalyticsUpdate)
+	mux.HandleFunc(TypeRetryFailedTracks, processor.ProcessRetryFailedTracks)
 
 	return &Server{
 		server:    server,

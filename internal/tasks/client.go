@@ -56,6 +56,17 @@ func (c *Client) EnqueueAnalyticsUpdate(userID, spotifyType string, isSuccess bo
 	return err
 }
 
+// EnqueueRetryFailedTracks enqueues a retry failed tracks task
+func (c *Client) EnqueueRetryFailedTracks(payload RetryFailedTracksPayload) error {
+	task, err := NewRetryFailedTracksTask(payload)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.client.Enqueue(task)
+	return err
+}
+
 // Close closes the client connection
 func (c *Client) Close() error {
 	return c.client.Close()

@@ -55,6 +55,18 @@ type ConversionJob struct {
 	GoogleAccountEmail  string // Google account email for quota tracking
 }
 
+// RetryJob represents a job to retry failed tracks
+type RetryJob struct {
+	ConversionID       string
+	UserID             string
+	ClerkUserID        string
+	YouTubePlaylistID  string
+	YouTubeAccessToken string
+	GoogleAccountEmail string
+	FailedTracks       []models.TrackConversionLog
+	UseLyricVideos     bool
+}
+
 type TrackMatchResult struct {
 	Index       int // Original position in Spotify playlist
 	Track       *spotify.PlaylistTrack
@@ -715,4 +727,141 @@ func (s *PlaylistConverterService) updateYouTubeAccountQuota(ctx context.Context
 
 	_, err = update.Where("account_email = ?", accountEmail).Exec(ctx)
 	return err
+}
+
+// RetryFailedTracks retries adding failed tracks to an existing YouTube playlist
+func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *RetryJob) error {
+	conversionID, err := uuid.Parse(job.ConversionID)
+	if err != nil {
+		return fmt.Errorf("invalid conversion ID: %w", err)
+	}
+
+	// Get existing conversion record
+	conversion := &models.PlaylistConversion{}
+	err = s.db.NewSelect().
+		Model(conversion).
+		Where("id = ?", conversionID).
+		Scan(ctx)
+
+	if err != nil {
+		return fmt.Errorf("failed to get conversion record: %w", err)
+	}
+
+	// Send started event
+	s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_started", "Retrying failed tracks", ws.ProgressData{
+		TotalTracks:     len(job.FailedTracks),
+		ProcessedTracks: 0,
+	})
+
+	// Match failed tracks to YouTube videos
+	totalSearches := 0
+	successfulRetries := 0
+	var videoIDsToAdd []string
+	updatedLogs := make([]models.TrackConversionLog, len(conversion.ConversionLog))
+	copy(updatedLogs, conversion.ConversionLog)
+
+	// Create a map for quick lookup of failed track indices
+	failedTrackMap := make(map[string]int) // SpotifyTrackID -> index in job.FailedTracks
+	for i, track := range job.FailedTracks {
+		failedTrackMap[track.SpotifyTrackID] = i
+	}
+
+	for i, logEntry := range updatedLogs {
+		if _, isFailedTrack := failedTrackMap[logEntry.SpotifyTrackID]; !isFailedTrack {
+			continue // Skip tracks that weren't requested for retry
+		}
+
+		// Create a PlaylistTrack from the log entry for matching
+		track := &spotify.PlaylistTrack{
+			ID:      logEntry.SpotifyTrackID,
+			Name:    logEntry.SpotifyTrackName,
+			Artists: strings.Split(logEntry.SpotifyArtists, ", "),
+		}
+
+		result := s.matchTrackToYouTube(ctx, track, job.UseLyricVideos, job.YouTubeAccessToken)
+		totalSearches += result.SearchCount
+
+		if result.Error == nil && result.VideoID != "" {
+			updatedLogs[i].Status = "success"
+			updatedLogs[i].YouTubeVideoID = result.VideoID
+			updatedLogs[i].YouTubeVideoURL = result.YouTubeURL
+			updatedLogs[i].MatchMethod = result.MatchMethod
+			updatedLogs[i].Error = ""
+			videoIDsToAdd = append(videoIDsToAdd, result.VideoID)
+			successfulRetries++
+		}
+
+		// Send progress update
+		s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_progress",
+			fmt.Sprintf("Retrying: %d/%d", i+1, len(job.FailedTracks)), ws.ProgressData{
+				TotalTracks:     len(job.FailedTracks),
+				ProcessedTracks: i + 1,
+				CurrentTrack:    fmt.Sprintf("%s - %s", logEntry.SpotifyTrackName, logEntry.SpotifyArtists),
+			})
+	}
+
+	// Add matched videos to YouTube playlist
+	playlistInserts := 0
+	if len(videoIDsToAdd) > 0 {
+		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, job.YouTubeAccessToken, job.YouTubePlaylistID, videoIDsToAdd)
+		playlistInserts = len(videoIDsToAdd) - len(addErrors)
+
+		// Update log entries for any errors adding videos
+		for videoID, err := range addErrors {
+			for i := range updatedLogs {
+				if updatedLogs[i].YouTubeVideoID == videoID {
+					updatedLogs[i].Status = "error"
+					updatedLogs[i].Error = fmt.Sprintf("Failed to add to playlist: %v", err)
+					successfulRetries--
+				}
+			}
+		}
+	}
+
+	// Recalculate success/failure counts
+	newSuccessCount := 0
+	newFailureCount := 0
+	for _, log := range updatedLogs {
+		if log.Status == "success" {
+			newSuccessCount++
+		} else {
+			newFailureCount++
+		}
+	}
+
+	// Update conversion record
+	conversion.ConversionLog = updatedLogs
+	conversion.SuccessCount = newSuccessCount
+	conversion.FailureCount = newFailureCount
+	conversion.UpdatedAt = time.Now()
+
+	_, err = s.db.NewUpdate().
+		Model(conversion).
+		Column("conversion_log", "success_count", "failure_count", "updated_at").
+		Where("id = ?", conversion.ID).
+		Exec(ctx)
+
+	if err != nil {
+		return fmt.Errorf("failed to update conversion record: %w", err)
+	}
+
+	// Update analytics: only update YouTube quota usage (searches + inserts)
+	// Retries don't count as new conversions, but they use quota
+	if totalSearches > 0 || playlistInserts > 0 {
+		if err := s.updateYouTubeAccountQuota(ctx, job.GoogleAccountEmail, totalSearches, playlistInserts); err != nil {
+			log.Printf("Warning: Failed to update YouTube account quota for retry: %v", err)
+		}
+	}
+
+	// Send completed event
+	s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_completed", "Retry completed", ws.ProgressData{
+		TotalTracks:        len(job.FailedTracks),
+		ProcessedTracks:    len(job.FailedTracks),
+		SuccessCount:       successfulRetries,
+		FailureCount:       len(job.FailedTracks) - successfulRetries,
+		YouTubePlaylistID:  conversion.YouTubePlaylistID,
+		YouTubePlaylistURL: conversion.YouTubePlaylistURL,
+	})
+
+	return nil
 }

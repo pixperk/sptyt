@@ -7,13 +7,15 @@ import (
 	"log"
 
 	"github.com/hibiken/asynq"
+	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
 )
 
 // Task type constants
 const (
-	TypePlaylistConversion = "playlist:convert"
-	TypeAnalyticsUpdate    = "analytics:update"
+	TypePlaylistConversion  = "playlist:convert"
+	TypeAnalyticsUpdate     = "analytics:update"
+	TypeRetryFailedTracks   = "playlist:retry"
 )
 
 // PlaylistConversionPayload represents the task payload for playlist conversion
@@ -60,6 +62,27 @@ func NewAnalyticsUpdateTask(payload AnalyticsUpdatePayload) (*asynq.Task, error)
 		return nil, fmt.Errorf("failed to marshal analytics payload: %w", err)
 	}
 	return asynq.NewTask(TypeAnalyticsUpdate, payloadBytes), nil
+}
+
+// RetryFailedTracksPayload represents the task payload for retrying failed tracks
+type RetryFailedTracksPayload struct {
+	ConversionID       string                     `json:"conversion_id"`
+	UserID             string                     `json:"user_id"`
+	ClerkUserID        string                     `json:"clerk_user_id"`
+	YouTubePlaylistID  string                     `json:"youtube_playlist_id"`
+	YouTubeAccessToken string                     `json:"youtube_access_token"`
+	GoogleAccountEmail string                     `json:"google_account_email"`
+	FailedTracks       []models.TrackConversionLog `json:"failed_tracks"`
+	UseLyricVideos     bool                       `json:"use_lyric_videos"`
+}
+
+// NewRetryFailedTracksTask creates a new Asynq task for retrying failed tracks
+func NewRetryFailedTracksTask(payload RetryFailedTracksPayload) (*asynq.Task, error) {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal retry payload: %w", err)
+	}
+	return asynq.NewTask(TypeRetryFailedTracks, payloadBytes), nil
 }
 
 // PlaylistConversionProcessor handles playlist conversion tasks
@@ -125,5 +148,36 @@ func (p *PlaylistConversionProcessor) ProcessAnalyticsUpdate(ctx context.Context
 	}
 
 	log.Printf("Analytics update completed successfully for user: %s", payload.UserID)
+	return nil
+}
+
+// ProcessRetryFailedTracks processes a retry failed tracks task
+func (p *PlaylistConversionProcessor) ProcessRetryFailedTracks(ctx context.Context, t *asynq.Task) error {
+	var payload RetryFailedTracksPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal retry payload: %w", err)
+	}
+
+	log.Printf("Processing retry failed tracks task: conversion=%s, tracks=%d", payload.ConversionID, len(payload.FailedTracks))
+
+	// Convert payload to service RetryJob
+	job := &services.RetryJob{
+		ConversionID:       payload.ConversionID,
+		UserID:             payload.UserID,
+		ClerkUserID:        payload.ClerkUserID,
+		YouTubePlaylistID:  payload.YouTubePlaylistID,
+		YouTubeAccessToken: payload.YouTubeAccessToken,
+		GoogleAccountEmail: payload.GoogleAccountEmail,
+		FailedTracks:       payload.FailedTracks,
+		UseLyricVideos:     payload.UseLyricVideos,
+	}
+
+	err := p.converterService.RetryFailedTracks(ctx, job)
+	if err != nil {
+		log.Printf("Retry failed tracks failed: %v", err)
+		return fmt.Errorf("retry failed: %w", err)
+	}
+
+	log.Printf("Retry failed tracks completed: conversion=%s", payload.ConversionID)
 	return nil
 }

@@ -419,6 +419,131 @@ func (h *PlaylistHandler) DeleteConversion(c echo.Context) error {
 	})
 }
 
+// RetryFailedTracksRequest is the request body for retrying failed tracks
+type RetryFailedTracksRequest struct {
+	TrackIDs       []string `json:"track_ids"`        // Optional: specific track IDs to retry. If empty, retries all failed tracks
+	UseLyricVideos bool     `json:"use_lyric_videos"` // Whether to search for lyric videos
+}
+
+// RetryFailedTracks retries adding failed tracks to an existing YouTube playlist
+func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
+	conversionID := c.Param("id")
+	if conversionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Conversion ID required")
+	}
+
+	// Get authenticated user
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
+
+	// Get user from database
+	var user models.User
+	err := h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Get the conversion
+	var conversion models.PlaylistConversion
+	err = h.db.NewSelect().
+		Model(&conversion).
+		Where("id = ? AND user_id = ?", conversionID, user.ID).
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Conversion not found")
+	}
+
+	// Check if conversion has a YouTube playlist
+	if conversion.YouTubePlaylistID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "No YouTube playlist exists for this conversion")
+	}
+
+	// Get user's YouTube token
+	var youtubeToken models.UserOAuthToken
+	err = h.db.NewSelect().
+		Model(&youtubeToken).
+		Where("user_id = ? AND provider = ?", user.ID, "youtube").
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "YouTube not connected. Please connect your YouTube account first.")
+	}
+
+	// Refresh token if needed
+	if time.Until(youtubeToken.ExpiresAt) < 5*time.Minute {
+		refreshedToken, err := h.refreshYouTubeToken(ctx, &youtubeToken)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "YouTube token expired. Please reconnect your YouTube account.")
+		}
+		youtubeToken = *refreshedToken
+	}
+
+	// Parse request body
+	var req RetryFailedTracksRequest
+	if err := c.Bind(&req); err != nil {
+		// Empty body is OK - means retry all failed tracks
+		req.TrackIDs = nil
+	}
+
+	// Get failed tracks from conversion log
+	var failedTracks []models.TrackConversionLog
+	trackIDSet := make(map[string]bool)
+	for _, id := range req.TrackIDs {
+		trackIDSet[id] = true
+	}
+
+	for _, track := range conversion.ConversionLog {
+		if track.Status != "success" {
+			// If specific track IDs provided, only include those
+			if len(req.TrackIDs) > 0 {
+				if trackIDSet[track.SpotifyTrackID] {
+					failedTracks = append(failedTracks, track)
+				}
+			} else {
+				failedTracks = append(failedTracks, track)
+			}
+		}
+	}
+
+	if len(failedTracks) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "No failed tracks to retry")
+	}
+
+	// Create retry task payload
+	payload := tasks.RetryFailedTracksPayload{
+		ConversionID:       conversion.ID.String(),
+		UserID:             user.ID.String(),
+		ClerkUserID:        clerkUserID,
+		YouTubePlaylistID:  conversion.YouTubePlaylistID,
+		YouTubeAccessToken: youtubeToken.AccessToken,
+		GoogleAccountEmail: youtubeToken.AccountEmail,
+		FailedTracks:       failedTracks,
+		UseLyricVideos:     req.UseLyricVideos,
+	}
+
+	// Enqueue retry task
+	err = h.taskClient.EnqueueRetryFailedTracks(payload)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start retry")
+	}
+
+	return c.JSON(http.StatusAccepted, map[string]interface{}{
+		"message":         "Retry started",
+		"conversion_id":   conversion.ID.String(),
+		"tracks_to_retry": len(failedTracks),
+	})
+}
+
 // refreshYouTubeToken refreshes an expired YouTube OAuth token
 func (h *PlaylistHandler) refreshYouTubeToken(ctx context.Context, token *models.UserOAuthToken) (*models.UserOAuthToken, error) {
 	clientID := os.Getenv("YOUTUBE_OAUTH_CLIENT_ID")
