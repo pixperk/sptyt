@@ -175,6 +175,11 @@ func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID
 		return errors.Validation("description too long (max 1000 characters)")
 	}
 
+	// Password protection requires premium
+	if req.Password != nil && *req.Password != "" && !req.IsPremium {
+		return errors.PremiumRequired("Password protection")
+	}
+
 	update := s.db.NewUpdate().
 		Model((*models.CustomLink)(nil)).
 		Where("id = ? AND user_id = ?", linkID, userID).
@@ -194,6 +199,20 @@ func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID
 	}
 	if req.IsPublic != nil {
 		update = update.Set("is_public = ?", *req.IsPublic)
+	}
+
+	// Handle password removal
+	if req.RemovePassword != nil && *req.RemovePassword {
+		update = update.Set("is_password_protected = ?", false)
+		update = update.Set("password_hash = ?", "")
+	} else if req.Password != nil && *req.Password != "" {
+		// Set new password
+		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return errors.Wrap(err, errors.ErrCodeInternal, "failed to hash password")
+		}
+		update = update.Set("is_password_protected = ?", true)
+		update = update.Set("password_hash = ?", string(hash))
 	}
 
 	result, err := update.Exec(ctx)
@@ -648,11 +667,14 @@ type CreateLinkRequest struct {
 }
 
 type UpdateLinkRequest struct {
-	Title        *string `json:"title"`
-	Description  *string `json:"description"`
-	ProfileImage *string `json:"profile_image"` // Cloudinary URL
-	Theme        *string `json:"theme"`
-	IsPublic     *bool   `json:"is_public"`
+	Title          *string `json:"title"`
+	Description    *string `json:"description"`
+	ProfileImage   *string `json:"profile_image"` // Cloudinary URL
+	Theme          *string `json:"theme"`
+	IsPublic       *bool   `json:"is_public"`
+	Password       *string `json:"password"`        // Set new password (premium only)
+	RemovePassword *bool   `json:"remove_password"` // Remove password protection
+	IsPremium      bool    `json:"-"`               // Set by handler based on user
 }
 
 type AddElementRequest struct {

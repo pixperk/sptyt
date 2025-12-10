@@ -88,8 +88,8 @@ func main() {
 	converterService := services.NewPlaylistConverterService(cfg.DB, spotifyClient, youtubeClient, wsHub, taskClient, redisCache)
 
 	// Start Asynq task server in background
-	// Reduced from 10 to 5 workers to minimize Redis polling commands
-	taskServer := tasks.NewServer(redisConfig, converterService, 5)
+	// Using 2 workers to minimize Redis polling commands while handling concurrent tasks
+	taskServer := tasks.NewServer(redisConfig, converterService, 2)
 	go func() {
 		if err := taskServer.Start(); err != nil {
 			log.Fatalf("Asynq server failed: %v", err)

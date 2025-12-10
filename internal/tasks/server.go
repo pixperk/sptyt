@@ -25,14 +25,12 @@ func NewServer(cfg *config.RedisConfig, converterService *services.PlaylistConve
 		asynq.Config{
 			Concurrency: concurrency, // Number of concurrent workers
 			Queues: map[string]int{
-				"critical": 6,
-				"default":  3,
-				"low":      1,
+				"default": 1, // Single queue to minimize polling
 			},
-			// Significantly reduce Redis polling frequency to minimize commands
-			HealthCheckInterval:      60 * time.Second, // Default: 15s - check worker health every minute
-			DelayedTaskCheckInterval: 60 * time.Second, // Default: 5s - check scheduled tasks every minute
-			StrictPriority:           true,             // Process higher priority queues first (more efficient)
+			// Aggressively reduce Redis polling to minimize idle commands
+			HealthCheckInterval:      5 * time.Minute,  // Default: 15s - check worker health every 5 min
+			DelayedTaskCheckInterval: 5 * time.Minute,  // Default: 5s - check scheduled tasks every 5 min
+			StrictPriority:           true,
 		},
 	)
 
