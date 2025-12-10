@@ -53,6 +53,12 @@ func NewPlaylistConverterService(db *bun.DB, spotifyClient *spotify.Client, yout
 	}
 }
 
+// CreateTokenManager creates a new TokenManager for the given user ID
+// This allows auto-refreshing YouTube tokens during long-running conversions
+func (s *PlaylistConverterService) CreateTokenManager(userID uuid.UUID) *TokenManager {
+	return NewTokenManager(s.db, userID)
+}
+
 type ConversionJob struct {
 	ConversionID        string
 	UserID              string // Database UUID
@@ -60,10 +66,23 @@ type ConversionJob struct {
 	SpotifyPlaylistID   string
 	SpotifyType         string // "playlist" or "album"
 	SpotifyPlaylistURL  string
-	YouTubeAccessToken  string
+	YouTubeAccessToken  string        // Initial token (may expire during long conversions)
+	TokenManager        *TokenManager // For auto-refreshing tokens during conversion
 	YouTubePlaylistName string
 	UseLyricVideos      bool
 	GoogleAccountEmail  string // Google account email for quota tracking
+}
+
+// GetAccessToken returns a valid access token, using TokenManager if available for auto-refresh
+func (j *ConversionJob) GetAccessToken(ctx context.Context) (string, error) {
+	if j.TokenManager != nil {
+		return j.TokenManager.GetAccessToken(ctx)
+	}
+	// Fall back to static token (may be expired for long conversions)
+	if j.YouTubeAccessToken == "" {
+		return "", fmt.Errorf("no YouTube access token available")
+	}
+	return j.YouTubeAccessToken, nil
 }
 
 // RetryJob represents a job to retry failed tracks
@@ -72,10 +91,34 @@ type RetryJob struct {
 	UserID             string
 	ClerkUserID        string
 	YouTubePlaylistID  string
-	YouTubeAccessToken string
+	YouTubeAccessToken string        // Initial token (may expire during long retries)
+	TokenManager       *TokenManager // For auto-refreshing tokens during retry
 	GoogleAccountEmail string
 	FailedTracks       []models.TrackConversionLog
 	UseLyricVideos     bool
+}
+
+// GetAccessToken returns a valid access token, using TokenManager if available for auto-refresh
+func (j *RetryJob) GetAccessToken(ctx context.Context) (string, error) {
+	if j.TokenManager != nil {
+		return j.TokenManager.GetAccessToken(ctx)
+	}
+	// Fall back to static token
+	if j.YouTubeAccessToken == "" {
+		return "", fmt.Errorf("no YouTube access token available")
+	}
+	return j.YouTubeAccessToken, nil
+}
+
+// TokenProvider interface for jobs that can provide access tokens
+type TokenProvider interface {
+	GetAccessToken(ctx context.Context) (string, error)
+}
+
+// matchJobConfig holds the config needed for track matching
+type matchJobConfig struct {
+	UseLyricVideos bool
+	TokenProvider  TokenProvider
 }
 
 type TrackMatchResult struct {
@@ -187,7 +230,14 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 		youtubePlaylistName = playlist.Name + " (from Spotify)"
 	}
 
-	youtubePlaylistID, err := s.youtubeClient.CreatePlaylist(ctx, job.YouTubeAccessToken, youtubePlaylistName, fmt.Sprintf("Converted from Spotify playlist: %s", playlist.Name))
+	// Get fresh access token (auto-refreshes if expired)
+	accessToken, err := job.GetAccessToken(ctx)
+	if err != nil {
+		s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to get YouTube access token: %v", err))
+		return nil, fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	youtubePlaylistID, err := s.youtubeClient.CreatePlaylist(ctx, accessToken, youtubePlaylistName, fmt.Sprintf("Converted from Spotify playlist: %s", playlist.Name))
 	if err != nil {
 		// Check if this is a YouTube API error (quota, 401, 403, 409)
 		countsAgainstQuota := !isYouTubeAPIError(err)
@@ -212,7 +262,7 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	})
 
 	// Match tracks concurrently using worker pool (uses user's YouTube quota via OAuth token)
-	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job.UseLyricVideos, job.ClerkUserID, conversion.ID.String(), job.YouTubeAccessToken)
+	matchResults := s.matchTracksWithWorkerPool(ctx, tracks, job, conversion.ID.String())
 
 	// Add matched videos to YouTube playlist
 	var conversionLogs []models.TrackConversionLog
@@ -252,7 +302,13 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 	// Add videos to YouTube playlist in batches with rate limiting
 	playlistInserts := 0 // Track successful playlist insert API calls
 	if len(videoIDs) > 0 {
-		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, job.YouTubeAccessToken, youtubePlaylistID, videoIDs)
+		// Get fresh access token for adding videos (may have expired during matching)
+		addToken, err := job.GetAccessToken(ctx)
+		if err != nil {
+			s.updateConversionStatus(ctx, conversion.ID, "failed", fmt.Sprintf("Failed to get access token for adding videos: %v", err))
+			return nil, fmt.Errorf("failed to get access token: %w", err)
+		}
+		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, addToken, youtubePlaylistID, videoIDs)
 
 		// Calculate successful inserts (each video added = 1 playlist insert API call)
 		playlistInserts = len(videoIDs) - len(addErrors)
@@ -314,7 +370,7 @@ type JobWithIndex struct {
 }
 
 // matchTracksWithWorkerPool uses a worker pool to match tracks concurrently
-func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context, tracks []*spotify.PlaylistTrack, useLyricVideos bool, userID string, conversionID string, accessToken string) []TrackMatchResult {
+func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context, tracks []*spotify.PlaylistTrack, job *ConversionJob, conversionID string) []TrackMatchResult {
 	// Create channels
 	jobsChan := make(chan JobWithIndex, len(tracks))
 	resultsChan := make(chan TrackMatchResult, len(tracks))
@@ -327,7 +383,7 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 	var wg sync.WaitGroup
 	for i := 0; i < s.workerCount; i++ {
 		wg.Add(1)
-		go s.trackMatchWorker(ctx, i, jobsChan, resultsChan, useLyricVideos, accessToken, &wg)
+		go s.trackMatchWorker(ctx, i, jobsChan, resultsChan, job, &wg)
 	}
 
 	// Send jobs to workers with their original indices
@@ -359,7 +415,7 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 				currentTrack = fmt.Sprintf("%s - %s", result.Track.Name, strings.Join(result.Track.Artists, ", "))
 			}
 
-			s.publishProgress(userID, conversionID, "progress", fmt.Sprintf("Matching tracks: %d/%d", currentCount, totalTracks), ws.ProgressData{
+			s.publishProgress(job.ClerkUserID, conversionID, "progress", fmt.Sprintf("Matching tracks: %d/%d", currentCount, totalTracks), ws.ProgressData{
 				TotalTracks:     totalTracks,
 				ProcessedTracks: currentCount,
 				CurrentTrack:    currentTrack,
@@ -380,7 +436,7 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 }
 
 // trackMatchWorker is a worker goroutine that matches tracks to YouTube videos
-func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerID int, jobs <-chan JobWithIndex, results chan<- TrackMatchResult, useLyricVideos bool, accessToken string, wg *sync.WaitGroup) {
+func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerID int, jobs <-chan JobWithIndex, results chan<- TrackMatchResult, convJob *ConversionJob, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for job := range jobs {
@@ -393,7 +449,11 @@ func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerI
 			}
 			return
 		default:
-			result := s.matchTrackToYouTube(ctx, job.Track, useLyricVideos, accessToken)
+			cfg := &matchJobConfig{
+				UseLyricVideos: convJob.UseLyricVideos,
+				TokenProvider:  convJob,
+			}
+			result := s.matchTrackToYouTube(ctx, job.Track, cfg)
 			result.Index = job.Index // Preserve the original index
 			results <- result
 		}
@@ -403,12 +463,14 @@ func (s *PlaylistConverterService) trackMatchWorker(ctx context.Context, workerI
 // matchTrackToYouTube matches a single Spotify track to a YouTube video
 // Uses user's OAuth token for searches (uses user's YouTube quota, not server's)
 // Caches successful searches to avoid redundant API calls
-func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, track *spotify.PlaylistTrack, useLyricVideos bool, accessToken string) TrackMatchResult {
+// Auto-refreshes token if expired during long conversions
+func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, track *spotify.PlaylistTrack, cfg *matchJobConfig) TrackMatchResult {
 	result := TrackMatchResult{
 		Track:       track,
 		SearchCount: 0,
 	}
 
+	useLyricVideos := cfg.UseLyricVideos
 	artistsStr := strings.Join(track.Artists, " ")
 
 	// Check cache first (if available)
@@ -429,9 +491,15 @@ func (s *PlaylistConverterService) matchTrackToYouTube(ctx context.Context, trac
 		// Cache miss - continue with API search
 	}
 
+	// Get fresh access token (auto-refreshes if expired)
+	accessToken, err := cfg.TokenProvider.GetAccessToken(ctx)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to get access token: %w", err)
+		return result
+	}
+
 	// Try different matching strategies
 	var videoURL string
-	var err error
 
 	// Strategy 1: Official Music Video (using user's quota via OAuth token)
 	if !useLyricVideos {
@@ -860,7 +928,11 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 			Artists: strings.Split(logEntry.SpotifyArtists, ", "),
 		}
 
-		result := s.matchTrackToYouTube(ctx, track, job.UseLyricVideos, job.YouTubeAccessToken)
+		cfg := &matchJobConfig{
+			UseLyricVideos: job.UseLyricVideos,
+			TokenProvider:  job,
+		}
+		result := s.matchTrackToYouTube(ctx, track, cfg)
 		totalSearches += result.SearchCount
 
 		// Check if we hit a quota error (403 quotaExceeded)
@@ -903,7 +975,12 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 	// Add matched videos to YouTube playlist
 	playlistInserts := 0
 	if len(videoIDsToAdd) > 0 && !quotaExhausted {
-		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, job.YouTubeAccessToken, job.YouTubePlaylistID, videoIDsToAdd)
+		// Get fresh access token for adding videos
+		addToken, err := job.GetAccessToken(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get access token for adding videos: %w", err)
+		}
+		addErrors := s.youtubeClient.AddVideosToPlaylistBatch(ctx, addToken, job.YouTubePlaylistID, videoIDsToAdd)
 		playlistInserts = len(videoIDsToAdd) - len(addErrors)
 
 		// Update log entries for any errors adding videos

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
@@ -104,6 +105,15 @@ func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Cont
 
 	log.Printf("Processing playlist conversion task: %s for user: %s", payload.ConversionID, payload.UserID)
 
+	// Parse user ID for token manager
+	userUUID, err := uuid.Parse(payload.UserID)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	// Create token manager for auto-refreshing YouTube tokens during long conversions
+	tokenManager := p.converterService.CreateTokenManager(userUUID)
+
 	job := &services.ConversionJob{
 		ConversionID:        payload.ConversionID,
 		UserID:              payload.UserID,
@@ -112,13 +122,14 @@ func (p *PlaylistConversionProcessor) ProcessPlaylistConversion(ctx context.Cont
 		SpotifyType:         payload.SpotifyType,
 		SpotifyPlaylistURL:  payload.SpotifyPlaylistURL,
 		YouTubeAccessToken:  payload.YouTubeAccessToken,
+		TokenManager:        tokenManager,
 		YouTubePlaylistName: payload.YouTubePlaylistName,
 		UseLyricVideos:      payload.UseLyricVideos,
 		GoogleAccountEmail:  payload.GoogleAccountEmail,
 	}
 
 	// Process the conversion
-	_, err := p.converterService.ConvertPlaylist(ctx, job)
+	_, err = p.converterService.ConvertPlaylist(ctx, job)
 	if err != nil {
 		log.Printf("Playlist conversion failed: %v", err)
 		return fmt.Errorf("conversion failed: %w", err)
@@ -160,6 +171,15 @@ func (p *PlaylistConversionProcessor) ProcessRetryFailedTracks(ctx context.Conte
 
 	log.Printf("Processing retry failed tracks task: conversion=%s, tracks=%d", payload.ConversionID, len(payload.FailedTracks))
 
+	// Parse user ID for token manager
+	userUUID, err := uuid.Parse(payload.UserID)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	// Create token manager for auto-refreshing YouTube tokens during retries
+	tokenManager := p.converterService.CreateTokenManager(userUUID)
+
 	// Convert payload to service RetryJob
 	job := &services.RetryJob{
 		ConversionID:       payload.ConversionID,
@@ -167,12 +187,13 @@ func (p *PlaylistConversionProcessor) ProcessRetryFailedTracks(ctx context.Conte
 		ClerkUserID:        payload.ClerkUserID,
 		YouTubePlaylistID:  payload.YouTubePlaylistID,
 		YouTubeAccessToken: payload.YouTubeAccessToken,
+		TokenManager:       tokenManager,
 		GoogleAccountEmail: payload.GoogleAccountEmail,
 		FailedTracks:       payload.FailedTracks,
 		UseLyricVideos:     payload.UseLyricVideos,
 	}
 
-	err := p.converterService.RetryFailedTracks(ctx, job)
+	err = p.converterService.RetryFailedTracks(ctx, job)
 	if err != nil {
 		log.Printf("Retry failed tracks failed: %v", err)
 		return fmt.Errorf("retry failed: %w", err)
