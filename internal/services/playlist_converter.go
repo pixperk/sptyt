@@ -76,7 +76,11 @@ type ConversionJob struct {
 // GetAccessToken returns a valid access token, using TokenManager if available for auto-refresh
 func (j *ConversionJob) GetAccessToken(ctx context.Context) (string, error) {
 	if j.TokenManager != nil {
-		return j.TokenManager.GetAccessToken(ctx)
+		token, err := j.TokenManager.GetAccessToken(ctx)
+		if err == nil {
+			return token, nil
+		}
+		// TokenManager failed (probably no stored OAuth token), fall back to static token
 	}
 	// Fall back to static token (may be expired for long conversions)
 	if j.YouTubeAccessToken == "" {
@@ -101,7 +105,11 @@ type RetryJob struct {
 // GetAccessToken returns a valid access token, using TokenManager if available for auto-refresh
 func (j *RetryJob) GetAccessToken(ctx context.Context) (string, error) {
 	if j.TokenManager != nil {
-		return j.TokenManager.GetAccessToken(ctx)
+		token, err := j.TokenManager.GetAccessToken(ctx)
+		if err == nil {
+			return token, nil
+		}
+		// TokenManager failed (probably no stored OAuth token), fall back to static token
 	}
 	// Fall back to static token
 	if j.YouTubeAccessToken == "" {
