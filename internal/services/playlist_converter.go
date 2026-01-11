@@ -890,19 +890,19 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 
 	if quotaErr == nil && !accountQuota.NeedsQuotaReset() && !accountQuota.CanAffordSearch() {
 		// Quota exceeded - fail immediately
-		s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_failed", "YouTube API quota exceeded", ws.ProgressData{
+		s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_failed", "YouTube API limit reached", ws.ProgressData{
 			TotalTracks:     len(job.FailedTracks),
 			ProcessedTracks: 0,
 			SuccessCount:    0,
 			FailureCount:    len(job.FailedTracks),
 			Error:           "quota_exceeded",
-			ErrorMessage:    "YouTube API quota exceeded for today. Please try again after midnight Pacific Time.",
+			ErrorMessage:    "YouTube API limit reached for today. Please try again tomorrow.",
 		})
 		return fmt.Errorf("quota exceeded")
 	}
 
 	// Send started event
-	s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_started", "Retrying failed tracks", ws.ProgressData{
+	s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_started", fmt.Sprintf("Retrying %d failed track(s)...", len(job.FailedTracks)), ws.ProgressData{
 		TotalTracks:     len(job.FailedTracks),
 		ProcessedTracks: 0,
 	})
@@ -948,14 +948,20 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 			errStr := strings.ToLower(result.Error.Error())
 			if strings.Contains(errStr, "quota") || strings.Contains(errStr, "403") {
 				quotaExhausted = true
-				// Send quota exceeded message
-				s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_failed", "YouTube API quota exceeded", ws.ProgressData{
+				// Send quota exceeded message with partial progress info
+				var partialMsg string
+				if successfulRetries > 0 {
+					partialMsg = fmt.Sprintf("YouTube API limit reached. %d track(s) were successfully added before the limit.", successfulRetries)
+				} else {
+					partialMsg = "YouTube API limit reached. Please try again tomorrow."
+				}
+				s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_partial", partialMsg, ws.ProgressData{
 					TotalTracks:     len(job.FailedTracks),
 					ProcessedTracks: processedCount,
 					SuccessCount:    successfulRetries,
 					FailureCount:    len(job.FailedTracks) - successfulRetries,
 					Error:           "quota_exceeded",
-					ErrorMessage:    "YouTube API quota exceeded. Retry stopped. Successfully retried tracks have been saved.",
+					ErrorMessage:    partialMsg,
 				})
 				break
 			}
@@ -973,9 +979,10 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 
 		// Send progress update
 		s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_progress",
-			fmt.Sprintf("Retrying: %d/%d", processedCount, len(job.FailedTracks)), ws.ProgressData{
+			fmt.Sprintf("Searching for track %d of %d...", processedCount, len(job.FailedTracks)), ws.ProgressData{
 				TotalTracks:     len(job.FailedTracks),
 				ProcessedTracks: processedCount,
+				SuccessCount:    successfulRetries,
 				CurrentTrack:    fmt.Sprintf("%s - %s", logEntry.SpotifyTrackName, logEntry.SpotifyArtists),
 			})
 	}
@@ -1048,21 +1055,28 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 
 	// Send completed or partial success event (if not already sent quota failure)
 	if !quotaExhausted {
-		eventType := "retry_completed"
-		message := "Retry completed"
+		var eventType, message string
+		remainingFailed := len(job.FailedTracks) - successfulRetries
+
 		if successfulRetries == 0 && len(job.FailedTracks) > 0 {
-			message = "Retry completed - no tracks could be matched"
+			// No tracks matched - likely due to unavailable videos
+			eventType = "retry_completed"
+			message = "Retry complete. No matching YouTube videos found for these tracks."
 		} else if successfulRetries == len(job.FailedTracks) {
-			message = "All tracks retried successfully!"
+			// All tracks succeeded
+			eventType = "retry_success"
+			message = fmt.Sprintf("All %d track(s) added successfully!", successfulRetries)
 		} else {
-			message = fmt.Sprintf("Retry completed - %d of %d tracks succeeded", successfulRetries, len(job.FailedTracks))
+			// Partial success
+			eventType = "retry_partial"
+			message = fmt.Sprintf("%d of %d track(s) added. %d still couldn't be matched.", successfulRetries, len(job.FailedTracks), remainingFailed)
 		}
 
 		s.publishProgress(job.ClerkUserID, job.ConversionID, eventType, message, ws.ProgressData{
 			TotalTracks:        len(job.FailedTracks),
 			ProcessedTracks:    len(job.FailedTracks),
 			SuccessCount:       successfulRetries,
-			FailureCount:       len(job.FailedTracks) - successfulRetries,
+			FailureCount:       remainingFailed,
 			YouTubePlaylistID:  conversion.YouTubePlaylistID,
 			YouTubePlaylistURL: conversion.YouTubePlaylistURL,
 		})

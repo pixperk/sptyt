@@ -465,7 +465,11 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 
 	// Check if conversion has a YouTube playlist
 	if conversion.YouTubePlaylistID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "No YouTube playlist exists for this conversion")
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "no_youtube_playlist",
+			"message": "This conversion doesn't have a YouTube playlist yet. The original conversion may have failed before creating the playlist.",
+		})
 	}
 
 	// Get user's YouTube token
@@ -476,14 +480,19 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 		Scan(ctx)
 
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "YouTube not connected. Please connect your YouTube account first.")
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "youtube_not_connected",
+			"message": "Please connect your YouTube account to retry failed tracks.",
+		})
 	}
 
 	// Verify same YouTube account is connected (if we know the original account)
 	if conversion.GoogleAccountEmail != "" && youtubeToken.AccountEmail != conversion.GoogleAccountEmail {
 		return c.JSON(http.StatusForbidden, map[string]interface{}{
+			"success":          false,
 			"error":            "wrong_youtube_account",
-			"message":          "You must use the same YouTube account that created the playlist",
+			"message":          fmt.Sprintf("Please connect the YouTube account '%s' that was used to create this playlist.", conversion.GoogleAccountEmail),
 			"required_account": conversion.GoogleAccountEmail,
 			"current_account":  youtubeToken.AccountEmail,
 		})
@@ -500,8 +509,9 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 		// Check if there's enough quota for at least one search
 		if !accountQuota.CanAffordSearch() {
 			return c.JSON(http.StatusTooManyRequests, map[string]interface{}{
+				"success":         false,
 				"error":           "quota_exceeded",
-				"message":         "YouTube API quota exceeded for today. Please try again after midnight Pacific Time.",
+				"message":         "YouTube API limit reached for today. Please try again tomorrow.",
 				"quota_used":      accountQuota.GetDailyQuotaUsed(),
 				"quota_limit":     models.YouTubeQuotaDailyLimit,
 				"quota_remaining": 0,
@@ -514,7 +524,11 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 	if time.Until(youtubeToken.ExpiresAt) < 5*time.Minute {
 		refreshedToken, err := h.refreshYouTubeToken(ctx, &youtubeToken)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "YouTube token expired. Please reconnect your YouTube account.")
+			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+				"success": false,
+				"error":   "youtube_token_expired",
+				"message": "Your YouTube session has expired. Please reconnect your YouTube account.",
+			})
 		}
 		youtubeToken = *refreshedToken
 	}
@@ -547,7 +561,11 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 	}
 
 	if len(failedTracks) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "No failed tracks to retry")
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "no_failed_tracks",
+			"message": "All tracks have already been successfully added to the playlist!",
+		})
 	}
 
 	// Create retry task payload
@@ -565,13 +583,25 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 	// Enqueue retry task
 	err = h.taskClient.EnqueueRetryFailedTracks(payload)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start retry")
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "retry_enqueue_failed",
+			"message": "Failed to start retry. Please try again.",
+		})
+	}
+
+	// Build track names for response
+	trackNames := make([]string, 0, len(failedTracks))
+	for _, track := range failedTracks {
+		trackNames = append(trackNames, fmt.Sprintf("%s - %s", track.SpotifyTrackName, track.SpotifyArtists))
 	}
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
-		"message":         "Retry started",
+		"success":         true,
+		"message":         fmt.Sprintf("Retrying %d failed track(s). You'll be notified when complete.", len(failedTracks)),
 		"conversion_id":   conversion.ID.String(),
 		"tracks_to_retry": len(failedTracks),
+		"track_names":     trackNames,
 	})
 }
 

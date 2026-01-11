@@ -7,8 +7,77 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
+
+// YouTubeAPIError represents a structured YouTube API error
+type YouTubeAPIError struct {
+	StatusCode int
+	Message    string
+	Reason     string // e.g., "quotaExceeded", "forbidden", etc.
+	IsQuota    bool
+}
+
+func (e *YouTubeAPIError) Error() string {
+	return e.Message
+}
+
+// parseYouTubeError parses YouTube API error response and returns a user-friendly error
+func parseYouTubeError(statusCode int, body []byte) error {
+	var apiErr struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Errors  []struct {
+				Reason  string `json:"reason"`
+				Domain  string `json:"domain"`
+				Message string `json:"message"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(body, &apiErr); err != nil {
+		// Can't parse, return generic error
+		return fmt.Errorf("YouTube API error (status %d): %s", statusCode, string(body))
+	}
+
+	// Check for quota exceeded
+	for _, e := range apiErr.Error.Errors {
+		if e.Reason == "quotaExceeded" || strings.Contains(e.Domain, "quota") {
+			return &YouTubeAPIError{
+				StatusCode: statusCode,
+				Message:    "YouTube API quota exceeded for today. Please try again tomorrow or connect a different YouTube account.",
+				Reason:     "quotaExceeded",
+				IsQuota:    true,
+			}
+		}
+		if e.Reason == "forbidden" || e.Reason == "accessNotConfigured" {
+			return &YouTubeAPIError{
+				StatusCode: statusCode,
+				Message:    "Access denied. Please reconnect your YouTube account.",
+				Reason:     e.Reason,
+				IsQuota:    false,
+			}
+		}
+	}
+
+	// Return the original message if no special handling
+	return &YouTubeAPIError{
+		StatusCode: statusCode,
+		Message:    apiErr.Error.Message,
+		Reason:     "",
+		IsQuota:    false,
+	}
+}
+
+// IsQuotaError checks if an error is a YouTube quota exceeded error
+func IsQuotaError(err error) bool {
+	if ytErr, ok := err.(*YouTubeAPIError); ok {
+		return ytErr.IsQuota
+	}
+	return strings.Contains(err.Error(), "quotaExceeded") || strings.Contains(err.Error(), "quota")
+}
 
 type Client struct {
 	apiKey       string
@@ -109,7 +178,7 @@ func (c *Client) SearchOfficialMV(ctx context.Context, trackName string, artist 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("youtube api failed: %s", body)
+		return "", parseYouTubeError(resp.StatusCode, body)
 	}
 
 	var searchResp searchResponse
@@ -158,7 +227,7 @@ func (c *Client) SearchLyricVideo(ctx context.Context, trackName string, artist 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("youtube api failed: %s", body)
+		return "", parseYouTubeError(resp.StatusCode, body)
 	}
 
 	var searchResp searchResponse
@@ -212,7 +281,7 @@ func (c *Client) searchWithToken(ctx context.Context, accessToken, query string)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("youtube api failed: %s", body)
+		return "", parseYouTubeError(resp.StatusCode, body)
 	}
 
 	var searchResp searchResponse
@@ -249,7 +318,7 @@ func (c *Client) GetVideoMetadata(ctx context.Context, videoID string) (string, 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", "", "", fmt.Errorf("youtube api failed: %s", body)
+		return "", "", "", parseYouTubeError(resp.StatusCode, body)
 	}
 
 	var videoResp videoDetailsWithISRC

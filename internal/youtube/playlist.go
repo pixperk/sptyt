@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -75,7 +74,7 @@ func (c *Client) CreatePlaylist(ctx context.Context, accessToken, title, descrip
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("youtube create playlist failed (status %d): %s", resp.StatusCode, body)
+		return "", parseYouTubeError(resp.StatusCode, body)
 	}
 
 	var playlistResp playlistInsertResponse
@@ -119,7 +118,7 @@ func (c *Client) AddVideoToPlaylist(ctx context.Context, accessToken, playlistID
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("youtube add video to playlist failed (status %d): %s", resp.StatusCode, body)
+		return parseYouTubeError(resp.StatusCode, body)
 	}
 
 	return nil
