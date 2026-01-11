@@ -241,19 +241,6 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Added profile_image column to custom_links table")
 	}
 
-	// Add YouTube quota tracking columns to user_analytics
-	_, err = db.Exec(`
-		ALTER TABLE user_analytics
-		ADD COLUMN IF NOT EXISTS daily_youtube_searches INTEGER DEFAULT 0,
-		ADD COLUMN IF NOT EXISTS daily_playlist_inserts INTEGER DEFAULT 0,
-		ADD COLUMN IF NOT EXISTS last_quota_reset_date TIMESTAMP;
-	`)
-	if err != nil {
-		log.Printf("Warning: Failed to add YouTube quota tracking columns: %v", err)
-	} else {
-		log.Println("Added YouTube quota tracking columns to user_analytics table")
-	}
-
 	// Add soft delete column to playlist_conversions
 	_, err = db.Exec(`
 		ALTER TABLE playlist_conversions
@@ -300,6 +287,20 @@ func RunMigrations(db *bun.DB) {
 		log.Printf("Warning: Failed to add google_account_email column: %v", err)
 	} else {
 		log.Println("Added google_account_email column to playlist_conversions table")
+	}
+
+	// Drop deprecated YouTube quota columns from user_analytics
+	// Quota is now tracked per Google account in youtube_account_quotas table
+	_, err = db.Exec(`
+		ALTER TABLE user_analytics
+		DROP COLUMN IF EXISTS daily_youtube_searches,
+		DROP COLUMN IF EXISTS daily_playlist_inserts,
+		DROP COLUMN IF EXISTS last_quota_reset_date;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to drop deprecated quota columns: %v", err)
+	} else {
+		log.Println("Dropped deprecated YouTube quota columns from user_analytics table")
 	}
 
 	log.Println("Database migrations completed successfully")

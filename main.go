@@ -155,7 +155,7 @@ func main() {
 		clerkMiddleware := auth.NewClerkMiddleware(cfg.ClerkSecretKey)
 		protectedHandler := handlers.NewProtectedHandler(handler, cfg.DB)
 		youtubeOAuthHandler := handlers.NewYouTubeOAuthHandler(cfg.DB, redisCache)
-		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService, taskClient)
+		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService, taskClient, redisCache)
 		playlistLimiter := custommw.NewPlaylistLimiter(cfg.DB, redisCache)
 		wsHandler := handlers.NewWebSocketHandler(wsHub)
 		analyticsHandler := handlers.NewAnalyticsHandler(cfg.DB)
@@ -190,6 +190,7 @@ func main() {
 		api.GET("/playlists/conversions/:id", playlistHandler.GetConversionStatus)
 		api.DELETE("/playlists/conversions/:id", playlistHandler.DeleteConversion)
 		api.POST("/playlists/conversions/:id/retry", playlistHandler.RetryFailedTracks)
+		api.POST("/playlists/conversions/:id/cancel", playlistHandler.CancelRetry)
 
 		// Analytics endpoints
 		api.GET("/analytics", analyticsHandler.GetUserAnalytics)

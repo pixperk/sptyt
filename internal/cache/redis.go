@@ -274,3 +274,25 @@ func (r *RedisCache) SetSpotifySearchResults(ctx context.Context, query string, 
 
 	return r.client.Set(ctx, key, data, ttl).Err()
 }
+
+// Conversion cancellation helpers
+
+// SetConversionCancel sets a cancel flag for a conversion/retry operation
+func (r *RedisCache) SetConversionCancel(ctx context.Context, conversionID string) error {
+	key := "conversion:cancel:" + conversionID
+	// Short TTL - if not picked up within 5 minutes, it expires
+	return r.client.Set(ctx, key, "1", 5*time.Minute).Err()
+}
+
+// IsConversionCancelled checks if a conversion/retry has been cancelled
+func (r *RedisCache) IsConversionCancelled(ctx context.Context, conversionID string) bool {
+	key := "conversion:cancel:" + conversionID
+	val, err := r.client.Get(ctx, key).Result()
+	return err == nil && val == "1"
+}
+
+// ClearConversionCancel removes the cancel flag (called after cancel is processed)
+func (r *RedisCache) ClearConversionCancel(ctx context.Context, conversionID string) error {
+	key := "conversion:cancel:" + conversionID
+	return r.client.Del(ctx, key).Err()
+}

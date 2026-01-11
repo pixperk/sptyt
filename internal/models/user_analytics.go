@@ -36,13 +36,6 @@ type UserAnalytics struct {
 	CurrentMonth       int `bun:",default:0" json:"current_month"` // 1-12
 	CurrentYear        int `bun:",default:0" json:"current_year"`  // e.g., 2025
 
-	// YouTube quota tracking (uses user's OAuth token quota)
-	// YouTube API costs: Search = 100 units, Playlist operations = 50 units
-	// Daily limit is typically 10,000 units per user
-	DailyYouTubeSearches int        `bun:"daily_youtube_searches,default:0" json:"daily_youtube_searches"`
-	DailyPlaylistInserts int        `bun:"daily_playlist_inserts,default:0" json:"daily_playlist_inserts"`
-	LastQuotaResetDate   *time.Time `bun:"last_quota_reset_date,nullzero" json:"last_quota_reset_date,omitempty"`
-
 	// Time tracking
 	FirstConversionAt *time.Time `bun:",nullzero" json:"first_conversion_at,omitempty"`
 	LastConversionAt  *time.Time `bun:",nullzero" json:"last_conversion_at,omitempty"`
@@ -69,45 +62,4 @@ func (ua *UserAnalytics) GetTrackMatchRate() float64 {
 		return 0
 	}
 	return (float64(ua.TotalTracksMatched) / float64(ua.TotalTracksProcessed)) * 100
-}
-
-// YouTube API quota costs
-const (
-	YouTubeQuotaCostSearch         = 100
-	YouTubeQuotaCostPlaylistInsert = 50
-	YouTubeQuotaDailyLimit         = 10000
-)
-
-// GetDailyQuotaUsed calculates estimated YouTube quota used today
-func (ua *UserAnalytics) GetDailyQuotaUsed() int {
-	searchQuota := ua.DailyYouTubeSearches * YouTubeQuotaCostSearch
-	insertQuota := ua.DailyPlaylistInserts * YouTubeQuotaCostPlaylistInsert
-	return searchQuota + insertQuota
-}
-
-// GetDailyQuotaRemaining calculates remaining YouTube quota for today
-func (ua *UserAnalytics) GetDailyQuotaRemaining() int {
-	remaining := YouTubeQuotaDailyLimit - ua.GetDailyQuotaUsed()
-	if remaining < 0 {
-		return 0
-	}
-	return remaining
-}
-
-// GetDailyQuotaPercentage calculates percentage of daily quota used
-func (ua *UserAnalytics) GetDailyQuotaPercentage() float64 {
-	return (float64(ua.GetDailyQuotaUsed()) / float64(YouTubeQuotaDailyLimit)) * 100
-}
-
-// NeedsQuotaReset checks if quota counters need to be reset (new day)
-func (ua *UserAnalytics) NeedsQuotaReset() bool {
-	if ua.LastQuotaResetDate == nil {
-		return true
-	}
-	// YouTube quota resets at midnight Pacific Time
-	// For simplicity, we use UTC date comparison
-	now := time.Now().UTC()
-	lastReset := ua.LastQuotaResetDate.UTC()
-	return now.Year() != lastReset.Year() ||
-		now.YearDay() != lastReset.YearDay()
 }

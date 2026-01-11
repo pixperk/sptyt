@@ -732,9 +732,6 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 			MonthlyConversions:   monthlyConversions,
 			CurrentMonth:         int(now.Month()),
 			CurrentYear:          now.Year(),
-			DailyYouTubeSearches: youtubeSearches,
-			DailyPlaylistInserts: playlistInserts,
-			LastQuotaResetDate:   &now,
 			FirstConversionAt:    &now,
 			LastConversionAt:     &now,
 			CreatedAt:            now,
@@ -766,21 +763,6 @@ func (s *PlaylistConverterService) updateUserAnalytics(ctx context.Context, user
 		Set("total_tracks_failed = total_tracks_failed + ?", failureCount).
 		Set("last_conversion_at = ?", now).
 		Set("updated_at = ?", now)
-
-	// Update YouTube quota tracking
-	// Check if we need to reset daily quota counters (new day)
-	if analytics.NeedsQuotaReset() {
-		// New day, reset counters
-		update = update.
-			Set("daily_youtube_searches = ?", youtubeSearches).
-			Set("daily_playlist_inserts = ?", playlistInserts).
-			Set("last_quota_reset_date = ?", now)
-	} else {
-		// Same day, increment
-		update = update.
-			Set("daily_youtube_searches = daily_youtube_searches + ?", youtubeSearches).
-			Set("daily_playlist_inserts = daily_playlist_inserts + ?", playlistInserts)
-	}
 
 	// Only update monthly counter if this conversion counts against quota
 	if countsAgainstQuota {
@@ -922,9 +904,34 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 		failedTrackMap[track.SpotifyTrackID] = i
 	}
 
+	cancelled := false
 	for i, logEntry := range updatedLogs {
 		if _, isFailedTrack := failedTrackMap[logEntry.SpotifyTrackID]; !isFailedTrack {
 			continue // Skip tracks that weren't requested for retry
+		}
+
+		// Check for cancellation before processing each track
+		if s.cache != nil && s.cache.IsConversionCancelled(ctx, job.ConversionID) {
+			cancelled = true
+			// Clear the cancel flag
+			_ = s.cache.ClearConversionCancel(ctx, job.ConversionID)
+
+			// Send cancelled event
+			var cancelMsg string
+			if successfulRetries > 0 {
+				cancelMsg = fmt.Sprintf("Cancelled. %d track(s) were added before stopping.", successfulRetries)
+			} else {
+				cancelMsg = "Cancelled. No tracks were added."
+			}
+			s.publishProgress(job.ClerkUserID, job.ConversionID, "retry_cancelled", cancelMsg, ws.ProgressData{
+				TotalTracks:     len(job.FailedTracks),
+				ProcessedTracks: processedCount,
+				SuccessCount:    successfulRetries,
+				FailureCount:    len(job.FailedTracks) - successfulRetries,
+				Error:           "cancelled",
+				ErrorMessage:    cancelMsg,
+			})
+			break
 		}
 
 		processedCount++
@@ -1053,8 +1060,8 @@ func (s *PlaylistConverterService) RetryFailedTracks(ctx context.Context, job *R
 		}
 	}
 
-	// Send completed or partial success event (if not already sent quota failure)
-	if !quotaExhausted {
+	// Send completed or partial success event (if not already sent quota failure or cancelled)
+	if !quotaExhausted && !cancelled {
 		var eventType, message string
 		remainingFailed := len(job.FailedTracks) - successfulRetries
 

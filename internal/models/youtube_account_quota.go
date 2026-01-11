@@ -7,6 +7,13 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// YouTube API quota costs
+const (
+	YouTubeQuotaCostSearch         = 100
+	YouTubeQuotaCostPlaylistInsert = 50
+	YouTubeQuotaDailyLimit         = 10000
+)
+
 // YouTubeAccountQuota tracks YouTube API quota per Google account
 // Quota is tied to the Google account, not the app user
 type YouTubeAccountQuota struct {

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"github.com/pixperk/sptyt/internal/database"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
+	"github.com/pixperk/sptyt/internal/cache"
+	"github.com/pixperk/sptyt/internal/database"
 	custommw "github.com/pixperk/sptyt/internal/middleware"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/pixperk/sptyt/internal/services"
@@ -27,13 +28,15 @@ type PlaylistHandler struct {
 	db               *bun.DB
 	converterService *services.PlaylistConverterService
 	taskClient       *tasks.Client
+	cache            *cache.RedisCache
 }
 
-func NewPlaylistHandler(db *bun.DB, converterService *services.PlaylistConverterService, taskClient *tasks.Client) *PlaylistHandler {
+func NewPlaylistHandler(db *bun.DB, converterService *services.PlaylistConverterService, taskClient *tasks.Client, redisCache *cache.RedisCache) *PlaylistHandler {
 	return &PlaylistHandler{
 		db:               db,
 		converterService: converterService,
 		taskClient:       taskClient,
+		cache:            redisCache,
 	}
 }
 
@@ -602,6 +605,78 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 		"conversion_id":   conversion.ID.String(),
 		"tracks_to_retry": len(failedTracks),
 		"track_names":     trackNames,
+	})
+}
+
+// CancelRetry cancels an in-progress retry operation
+func (h *PlaylistHandler) CancelRetry(c echo.Context) error {
+	conversionID := c.Param("id")
+	if conversionID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "missing_conversion_id",
+			"message": "Conversion ID is required.",
+		})
+	}
+
+	// Get authenticated user
+	clerkUserID, ok := auth.GetClerkUserID(c)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not authenticated")
+	}
+
+	ctx, cancel := database.NewQueryContext()
+	defer cancel()
+
+	// Get user from database
+	var user models.User
+	err := h.db.NewSelect().
+		Model(&user).
+		Where("clerk_id = ?", clerkUserID).
+		Scan(ctx)
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get user")
+	}
+
+	// Verify ownership of the conversion
+	var conversion models.PlaylistConversion
+	err = h.db.NewSelect().
+		Model(&conversion).
+		Where("id = ? AND user_id = ?", conversionID, user.ID).
+		Scan(ctx)
+
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]interface{}{
+			"success": false,
+			"error":   "conversion_not_found",
+			"message": "Conversion not found.",
+		})
+	}
+
+	// Check if cache is available
+	if h.cache == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "service_unavailable",
+			"message": "Cancel feature is temporarily unavailable.",
+		})
+	}
+
+	// Set cancel flag in Redis
+	err = h.cache.SetConversionCancel(ctx, conversionID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "cancel_failed",
+			"message": "Failed to cancel. Please try again.",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success":       true,
+		"message":       "Cancel request sent. The operation will stop after the current track.",
+		"conversion_id": conversionID,
 	})
 }
 
