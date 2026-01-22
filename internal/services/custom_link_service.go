@@ -53,19 +53,9 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 		slug = s.generateUniqueSlug(ctx, req.Title)
 	}
 
-	// Calculate expiration for free users
-	var expiresAt *time.Time
-	if !req.IsPremium {
-		expiry := time.Now().Add(7 * 24 * time.Hour) // 7 days
-		expiresAt = &expiry
-	}
-
 	// Hash password if provided
 	var passwordHash string
 	if req.Password != "" {
-		if !req.IsPremium {
-			return nil, errors.PremiumRequired("Password protection")
-		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to hash password")
@@ -83,7 +73,6 @@ func (s *CustomLinkService) CreateCustomLink(ctx context.Context, userID uuid.UU
 		IsPasswordProtected: req.Password != "",
 		PasswordHash:        passwordHash,
 		ConversionID:        req.ConversionID,
-		ExpiresAt:           expiresAt,
 		IsPublic:            req.IsPublic,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -173,11 +162,6 @@ func (s *CustomLinkService) UpdateCustomLink(ctx context.Context, linkID, userID
 	}
 	if req.Description != nil && len(*req.Description) > 1000 {
 		return errors.Validation("description too long (max 1000 characters)")
-	}
-
-	// Password protection requires premium
-	if req.Password != nil && *req.Password != "" && !req.IsPremium {
-		return errors.PremiumRequired("Password protection")
 	}
 
 	update := s.db.NewUpdate().
@@ -658,12 +642,11 @@ type CreateLinkRequest struct {
 	Title        string     `json:"title" validate:"required"`
 	Description  string     `json:"description"`
 	ProfileImage string     `json:"profile_image"` // Cloudinary URL
-	CustomSlug   string     `json:"custom_slug"`   // Premium only
+	CustomSlug   string     `json:"custom_slug"`
 	Theme        string     `json:"theme"`
-	Password     string     `json:"password"`      // Premium only
+	Password     string     `json:"password"`
 	ConversionID *uuid.UUID `json:"conversion_id"`
 	IsPublic     bool       `json:"is_public"`
-	IsPremium    bool       `json:"-"` // Set by handler based on user
 }
 
 type UpdateLinkRequest struct {
@@ -672,9 +655,8 @@ type UpdateLinkRequest struct {
 	ProfileImage   *string `json:"profile_image"` // Cloudinary URL
 	Theme          *string `json:"theme"`
 	IsPublic       *bool   `json:"is_public"`
-	Password       *string `json:"password"`        // Set new password (premium only)
+	Password       *string `json:"password"`        // Set new password
 	RemovePassword *bool   `json:"remove_password"` // Remove password protection
-	IsPremium      bool    `json:"-"`               // Set by handler based on user
 }
 
 type AddElementRequest struct {

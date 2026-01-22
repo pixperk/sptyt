@@ -303,5 +303,19 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Dropped deprecated YouTube quota columns from user_analytics table")
 	}
 
+	// Drop subscription columns from users table (payments removed)
+	_, err = db.Exec(`
+		ALTER TABLE users
+		DROP COLUMN IF EXISTS subscription_tier,
+		DROP COLUMN IF EXISTS subscription_status,
+		DROP COLUMN IF EXISTS subscription_id,
+		DROP COLUMN IF EXISTS subscription_ends_at;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to drop subscription columns: %v", err)
+	} else {
+		log.Println("Dropped subscription columns from users table")
+	}
+
 	log.Println("Database migrations completed successfully")
 }

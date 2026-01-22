@@ -136,10 +136,6 @@ func main() {
 	e.GET("/yt/:youtube_link", handler.YouTubeToSpotifyRedirect)
 	e.GET("/:link", handler.SmartRedirect)
 
-	// Webhook routes (no auth required - verified by signature)
-	webhookHandler := handlers.NewWebhookHandler(cfg.DB)
-	e.POST("/webhooks/dodopay", webhookHandler.DodoPayWebhook)
-
 	// Custom link public routes (no auth required)
 	customLinkService := services.NewCustomLinkService(cfg.DB)
 	customLinkHandler := handlers.NewCustomLinkHandler(customLinkService, cfg.DB, spotifyClient, youtubeClient, geniusClient, redisCache)
@@ -172,9 +168,6 @@ func main() {
 
 		// User endpoints
 		api.GET("/me", protectedHandler.Me)
-		api.POST("/checkout", protectedHandler.CreateCheckoutSession)
-		api.POST("/subscription/cancel", protectedHandler.CancelSubscription)
-		api.GET("/payment/return", protectedHandler.PaymentReturn)
 
 		// YouTube OAuth endpoints (protected - except callback above)
 		api.GET("/auth/youtube/authorize", youtubeOAuthHandler.Authorize)

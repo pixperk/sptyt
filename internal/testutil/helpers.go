@@ -168,15 +168,13 @@ func (tdb *TestDB) TruncateTables(ctx context.Context) {
 // CreateTestUser creates a test user in the database
 func (tdb *TestDB) CreateTestUser(ctx context.Context, opts ...UserOption) *models.User {
 	user := &models.User{
-		ID:                 uuid.New(),
-		ClerkID:            fmt.Sprintf("clerk_test_%s", uuid.New().String()[:8]),
-		Email:              fmt.Sprintf("test_%s@example.com", uuid.New().String()[:8]),
-		FirstName:          "Test",
-		LastName:           "User",
-		SubscriptionTier:   "free",
-		SubscriptionStatus: "inactive",
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
+		ID:        uuid.New(),
+		ClerkID:   fmt.Sprintf("clerk_test_%s", uuid.New().String()[:8]),
+		Email:     fmt.Sprintf("test_%s@example.com", uuid.New().String()[:8]),
+		FirstName: "Test",
+		LastName:  "User",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
 	// Apply options
@@ -193,16 +191,6 @@ func (tdb *TestDB) CreateTestUser(ctx context.Context, opts ...UserOption) *mode
 // UserOption is a functional option for creating test users
 type UserOption func(*models.User)
 
-// WithPremiumSubscription sets the user as a premium subscriber
-func WithPremiumSubscription(endsAt time.Time) UserOption {
-	return func(u *models.User) {
-		u.SubscriptionTier = "premium"
-		u.SubscriptionStatus = "active"
-		u.SubscriptionID = fmt.Sprintf("sub_test_%s", uuid.New().String()[:8])
-		u.SubscriptionEndsAt = &endsAt
-	}
-}
-
 // WithEmail sets a custom email
 func WithEmail(email string) UserOption {
 	return func(u *models.User) {
@@ -214,13 +202,6 @@ func WithEmail(email string) UserOption {
 func WithClerkID(clerkID string) UserOption {
 	return func(u *models.User) {
 		u.ClerkID = clerkID
-	}
-}
-
-// WithSubscriptionID sets a subscription ID
-func WithSubscriptionID(subID string) UserOption {
-	return func(u *models.User) {
-		u.SubscriptionID = subID
 	}
 }
 

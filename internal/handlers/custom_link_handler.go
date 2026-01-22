@@ -79,33 +79,6 @@ func (h *CustomLinkHandler) CreateCustomLink(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 
-	// Set premium status
-	req.IsPremium = user.IsPremium()
-
-	// Validate custom slug for free users
-	if req.CustomSlug != "" && !req.IsPremium {
-		return echo.NewHTTPError(http.StatusForbidden, "Custom slugs are a premium feature")
-	}
-
-	// Check link limits for free users
-	if !req.IsPremium {
-		count, err := h.db.NewSelect().
-			Model((*models.CustomLink)(nil)).
-			Where("user_id = ?", user.ID).
-			Count(ctx)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check limits")
-		}
-		if count >= 3 {
-			return echo.NewHTTPError(http.StatusForbidden, map[string]interface{}{
-				"error":           "Free tier limit reached",
-				"current_links":   count,
-				"max_links":       3,
-				"upgrade_required": true,
-			})
-		}
-	}
-
 	link, err := h.service.CreateCustomLink(ctx, user.ID, req)
 	if err != nil {
 		log.Printf("CreateCustomLink: %v", err)
@@ -288,20 +261,6 @@ func (h *CustomLinkHandler) AddElement(c echo.Context) error {
 	var req services.AddElementRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
-	}
-
-	// Check element limits for free users
-	if !user.IsPremium() {
-		count, err := h.db.NewSelect().
-			Model((*models.LinkElement)(nil)).
-			Where("custom_link_id = ?", linkID).
-			Count(ctx)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check limits")
-		}
-		if count >= 10 {
-			return echo.NewHTTPError(http.StatusForbidden, "Free tier allows max 10 elements per link")
-		}
 	}
 
 	element, err := h.service.AddElement(ctx, linkID, user.ID, req)

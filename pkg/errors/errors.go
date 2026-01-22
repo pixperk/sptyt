@@ -29,9 +29,8 @@ const (
 	ErrCodeExceedsLimit     ErrorCode = "EXCEEDS_LIMIT"
 
 	// Quota & Limit errors
-	ErrCodeQuotaExceeded    ErrorCode = "QUOTA_EXCEEDED"
-	ErrCodeRateLimited      ErrorCode = "RATE_LIMITED"
-	ErrCodePremiumRequired  ErrorCode = "PREMIUM_REQUIRED"
+	ErrCodeQuotaExceeded ErrorCode = "QUOTA_EXCEEDED"
+	ErrCodeRateLimited   ErrorCode = "RATE_LIMITED"
 
 	// External API errors
 	ErrCodeSpotifyAPI       ErrorCode = "SPOTIFY_API_ERROR"
@@ -121,7 +120,7 @@ func getDefaultStatusCode(code ErrorCode) int {
 	switch code {
 	case ErrCodeUnauthorized, ErrCodeInvalidToken, ErrCodeTokenExpired:
 		return http.StatusUnauthorized
-	case ErrCodeForbidden, ErrCodePremiumRequired:
+	case ErrCodeForbidden:
 		return http.StatusForbidden
 	case ErrCodeNotFound:
 		return http.StatusNotFound
@@ -166,10 +165,6 @@ func Validation(message string) *AppError {
 
 func QuotaExceeded(message string) *AppError {
 	return New(ErrCodeQuotaExceeded, message)
-}
-
-func PremiumRequired(feature string) *AppError {
-	return New(ErrCodePremiumRequired, fmt.Sprintf("%s is a premium feature", feature))
 }
 
 func YouTubeQuotaExceeded() *AppError {

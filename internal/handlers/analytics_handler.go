@@ -214,15 +214,9 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 	currentMonth := int(now.Month())
 	currentYear := now.Year()
 
-	// Determine user limits
-	var maxPlaylists, maxSongs int
-	if user.IsPremium() {
-		maxPlaylists = -1 // unlimited
-		maxSongs = 100
-	} else {
-		maxPlaylists = 5
-		maxSongs = 30
-	}
+	// User limits (same for everyone)
+	maxPlaylists := 50
+	maxSongs := 100
 
 	// Check if analytics exist and are for current month
 	var monthlyConversions int
@@ -310,11 +304,9 @@ func (h *AnalyticsHandler) GetMonthlyStats(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"month":             now.Format("January 2006"),
-		"month_num":         currentMonth,
-		"year":              currentYear,
-		"subscription_tier": user.SubscriptionTier,
-		"is_premium":        user.IsPremium(),
+		"month":     now.Format("January 2006"),
+		"month_num": currentMonth,
+		"year":      currentYear,
 		"limits": map[string]interface{}{
 			"max_playlists_per_month": maxPlaylists,
 			"max_songs_per_playlist":  maxSongs,

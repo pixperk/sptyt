@@ -20,17 +20,11 @@ type PlaylistLimits struct {
 	MaxSongsPerPlaylist  int
 }
 
-var (
-	FreeTierLimits = PlaylistLimits{
-		MaxPlaylistsPerMonth: 5,
-		MaxSongsPerPlaylist:  30,
-	}
-
-	PremiumTierLimits = PlaylistLimits{
-		MaxPlaylistsPerMonth: -1, // unlimited
-		MaxSongsPerPlaylist:  100,
-	}
-)
+// DefaultLimits - generous limits for all users
+var DefaultLimits = PlaylistLimits{
+	MaxPlaylistsPerMonth: 50,
+	MaxSongsPerPlaylist:  100,
+}
 
 type PlaylistLimiter struct {
 	db    *bun.DB
@@ -69,14 +63,6 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 				return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to get user"))
 			}
 
-			// Determine limits based on subscription tier
-			var limits PlaylistLimits
-			if user.IsPremium() {
-				limits = PremiumTierLimits
-			} else {
-				limits = FreeTierLimits
-			}
-
 			// Check monthly conversion count
 			count, err := pl.getMonthlyConversionCount(ctx, user.ID)
 			if err != nil {
@@ -84,20 +70,17 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 				return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to check limits"))
 			}
 
-			// -1 means unlimited playlists (premium)
-			if limits.MaxPlaylistsPerMonth >= 0 && count >= limits.MaxPlaylistsPerMonth {
+			if count >= DefaultLimits.MaxPlaylistsPerMonth {
 				return errors.ToHTTPError(
 					errors.QuotaExceeded("Monthly conversion limit reached").
-						WithMeta("limit", limits.MaxPlaylistsPerMonth).
+						WithMeta("limit", DefaultLimits.MaxPlaylistsPerMonth).
 						WithMeta("current_count", count).
-						WithMeta("max_songs_per_playlist", limits.MaxSongsPerPlaylist).
-						WithMeta("upgrade_required", !user.IsPremium()).
-						WithMeta("subscription_tier", user.SubscriptionTier),
+						WithMeta("max_songs_per_playlist", DefaultLimits.MaxSongsPerPlaylist),
 				)
 			}
 
 			// Store limits in context for handler to use
-			c.Set("playlist_limits", limits)
+			c.Set("playlist_limits", DefaultLimits)
 			c.Set("current_user", &user)
 			c.Set("monthly_conversions_used", count)
 
@@ -107,8 +90,6 @@ func (pl *PlaylistLimiter) CheckPlaylistConversionLimits() echo.MiddlewareFunc {
 }
 
 // getMonthlyConversionCount gets the number of conversions this month for a user from analytics
-// NOTE: No caching - this is a fast indexed query on user_id (single row lookup)
-// Caching would add complexity and stale data issues without meaningful performance gain
 func (pl *PlaylistLimiter) getMonthlyConversionCount(ctx context.Context, userID interface{}) (int, error) {
 	now := time.Now()
 	currentMonth := int(now.Month())
@@ -127,36 +108,26 @@ func (pl *PlaylistLimiter) getMonthlyConversionCount(ctx context.Context, userID
 	}
 
 	// Check if the analytics record is for the current month
-	var count int
 	if analytics.CurrentMonth == currentMonth && analytics.CurrentYear == currentYear {
-		count = analytics.MonthlyConversions
-	} else {
-		// Old month data, effectively 0 for this month
-		count = 0
+		return analytics.MonthlyConversions, nil
 	}
 
-	return count, nil
+	// Old month data, effectively 0 for this month
+	return 0, nil
 }
 
-// ValidatePlaylistSize validates that the playlist doesn't exceed user's limits
+// ValidatePlaylistSize validates that the playlist doesn't exceed track limit
 func ValidatePlaylistSize(c echo.Context, trackCount int) error {
 	limits, ok := c.Get("playlist_limits").(PlaylistLimits)
 	if !ok {
-		// Default to free tier if limits not set
-		limits = FreeTierLimits
+		limits = DefaultLimits
 	}
 
 	if trackCount > limits.MaxSongsPerPlaylist {
-		user, _ := c.Get("current_user").(*models.User)
-		isPremium := user != nil && user.IsPremium()
-
 		return errors.ToHTTPError(
 			errors.New(errors.ErrCodeExceedsLimit, "Playlist exceeds maximum track limit").
 				WithMeta("track_count", trackCount).
-				WithMeta("max_tracks_allowed", limits.MaxSongsPerPlaylist).
-				WithMeta("upgrade_required", !isPremium).
-				WithMeta("premium_max_tracks", PremiumTierLimits.MaxSongsPerPlaylist).
-				WithMeta("subscription_tier", user.SubscriptionTier),
+				WithMeta("max_tracks_allowed", limits.MaxSongsPerPlaylist),
 		)
 	}
 
@@ -185,14 +156,6 @@ func (pl *PlaylistLimiter) GetUserLimitsInfo(c echo.Context) error {
 		return errors.ToHTTPError(errors.Database(err).WithDetails("Failed to get user"))
 	}
 
-	// Determine limits
-	var limits PlaylistLimits
-	if user.IsPremium() {
-		limits = PremiumTierLimits
-	} else {
-		limits = FreeTierLimits
-	}
-
 	// Get current usage
 	count, err := pl.getMonthlyConversionCount(ctx, user.ID)
 	if err != nil {
@@ -200,20 +163,15 @@ func (pl *PlaylistLimiter) GetUserLimitsInfo(c echo.Context) error {
 		count = 0
 	}
 
+	remaining := DefaultLimits.MaxPlaylistsPerMonth - count
+	if remaining < 0 {
+		remaining = 0
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"subscription_tier":         user.SubscriptionTier,
-		"is_premium":                user.IsPremium(),
-		"max_playlists_per_month":   limits.MaxPlaylistsPerMonth,
-		"max_songs_per_playlist":    limits.MaxSongsPerPlaylist,
+		"max_playlists_per_month":   DefaultLimits.MaxPlaylistsPerMonth,
+		"max_songs_per_playlist":    DefaultLimits.MaxSongsPerPlaylist,
 		"playlists_used_this_month": count,
-		"playlists_remaining":       limits.MaxPlaylistsPerMonth - count,
-		"free_tier_limits": map[string]int{
-			"max_playlists_per_month": FreeTierLimits.MaxPlaylistsPerMonth,
-			"max_songs_per_playlist":  FreeTierLimits.MaxSongsPerPlaylist,
-		},
-		"premium_tier_limits": map[string]int{
-			"max_playlists_per_month": PremiumTierLimits.MaxPlaylistsPerMonth,
-			"max_songs_per_playlist":  PremiumTierLimits.MaxSongsPerPlaylist,
-		},
+		"playlists_remaining":       remaining,
 	})
 }
