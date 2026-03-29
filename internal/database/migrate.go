@@ -321,5 +321,40 @@ func RunMigrations(db *bun.DB) {
 		log.Println("Dropped subscription columns from users table")
 	}
 
+	// Add foreign key constraints (idempotent via IF NOT EXISTS pattern)
+	fkStatements := []string{
+		`DO $$ BEGIN
+			ALTER TABLE oauth_tokens ADD CONSTRAINT fk_oauth_tokens_user_id
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+		`DO $$ BEGIN
+			ALTER TABLE playlist_conversions ADD CONSTRAINT fk_playlist_conversions_user_id
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+		`DO $$ BEGIN
+			ALTER TABLE user_analytics ADD CONSTRAINT fk_user_analytics_user_id
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+		`DO $$ BEGIN
+			ALTER TABLE custom_links ADD CONSTRAINT fk_custom_links_user_id
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+		`DO $$ BEGIN
+			ALTER TABLE link_elements ADD CONSTRAINT fk_link_elements_custom_link_id
+			FOREIGN KEY (custom_link_id) REFERENCES custom_links(id) ON DELETE CASCADE;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+		`DO $$ BEGIN
+			ALTER TABLE link_analytics ADD CONSTRAINT fk_link_analytics_custom_link_id
+			FOREIGN KEY (custom_link_id) REFERENCES custom_links(id) ON DELETE CASCADE;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	}
+
+	for _, stmt := range fkStatements {
+		if _, err := db.Exec(stmt); err != nil {
+			log.Printf("Warning: Failed to add foreign key constraint: %v", err)
+		}
+	}
+	log.Println("Foreign key constraints verified")
+
 	log.Println("Database migrations completed successfully")
 }

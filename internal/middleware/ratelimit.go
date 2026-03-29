@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -27,10 +28,9 @@ type RateLimiter struct {
 
 	// In-memory fallback (used when Redis is down)
 	fallbackCache map[string]*rateLimitEntry
-	fallbackMu    sync.RWMutex
+	fallbackMu    sync.Mutex
 	stopCleanup   chan struct{}
-	inFallback    bool // Track if we're in fallback mode
-	fallbackMu2   sync.RWMutex
+	inFallback    atomic.Bool
 }
 
 func NewRateLimiter(client *redis.Client, requestsPerMinute int) *RateLimiter {
@@ -42,7 +42,6 @@ func NewRateLimiter(client *redis.Client, requestsPerMinute int) *RateLimiter {
 		keyPrefix:     "ratelimit:",
 		fallbackCache: make(map[string]*rateLimitEntry),
 		stopCleanup:   make(chan struct{}),
-		inFallback:    false,
 	}
 
 	// Start cleanup goroutine for in-memory cache
@@ -144,9 +143,7 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 			current, err := rl.client.Incr(ctx, key).Result()
 			if err != nil {
 				// Redis is down - fall back to in-memory rate limiting
-				rl.fallbackMu2.Lock()
-				rl.inFallback = true
-				rl.fallbackMu2.Unlock()
+				rl.inFallback.Store(true)
 
 				// Use in-memory rate limiting with stricter limits
 				_, remaining, exceeded := rl.checkFallbackRateLimit(ip)
@@ -168,9 +165,7 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 			}
 
 			// Redis is working - reset fallback flag if needed
-			rl.fallbackMu2.Lock()
-			rl.inFallback = false
-			rl.fallbackMu2.Unlock()
+			rl.inFallback.Store(false)
 
 			if current == 1 {
 				rl.client.Expire(ctx, key, rl.window)

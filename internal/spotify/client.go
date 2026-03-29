@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pixperk/sptyt/pkg/httputil"
 )
 
 type Client struct {
@@ -165,7 +167,7 @@ func (c *Client) authenticate(ctx context.Context) error {
 	req.Header.Set("Authorization", "Basic "+auth)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httputil.DoWithRetry(ctx, c.httpClient, req, 2)
 	if err != nil {
 		return err
 	}
@@ -203,7 +205,7 @@ func (c *Client) GetTrack(ctx context.Context, trackID string) (*Track, error) {
 
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httputil.DoWithRetry(ctx, c.httpClient, req, 2)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +250,7 @@ func (c *Client) GetTrackDetails(ctx context.Context, trackID string) (*TrackDet
 
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httputil.DoWithRetry(ctx, c.httpClient, req, 2)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
 	"github.com/pixperk/sptyt/internal/cache"
+	"github.com/pixperk/sptyt/internal/crypto"
 	"github.com/pixperk/sptyt/internal/database"
 	custommw "github.com/pixperk/sptyt/internal/middleware"
 	"github.com/pixperk/sptyt/internal/models"
@@ -78,6 +79,10 @@ func (h *PlaylistHandler) ConvertPlaylist(c echo.Context) error {
 
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "YouTube not authorized. Please connect your YouTube account first.")
+	}
+
+	if err := youtubeToken.DecryptTokens(); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to read YouTube token")
 	}
 
 	// Refresh token if expired or about to expire (within 5 minutes)
@@ -490,6 +495,14 @@ func (h *PlaylistHandler) RetryFailedTracks(c echo.Context) error {
 		})
 	}
 
+	if err := youtubeToken.DecryptTokens(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "token_error",
+			"message": "Failed to read YouTube token",
+		})
+	}
+
 	// Verify same YouTube account is connected (if we know the original account)
 	if conversion.GoogleAccountEmail != "" && youtubeToken.AccountEmail != conversion.GoogleAccountEmail {
 		return c.JSON(http.StatusForbidden, map[string]interface{}{
@@ -724,14 +737,22 @@ func (h *PlaylistHandler) refreshYouTubeToken(ctx context.Context, token *models
 		return nil, fmt.Errorf("failed to decode token response: %w", err)
 	}
 
-	// Update token in database
+	// Keep plaintext for in-memory use
 	token.AccessToken = tokenResp.AccessToken
 	token.ExpiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 	token.UpdatedAt = time.Now()
 
+	// Encrypt before persisting to DB
+	encAccessToken, encErr := crypto.Encrypt(tokenResp.AccessToken)
+	if encErr != nil {
+		return nil, fmt.Errorf("failed to encrypt token: %w", encErr)
+	}
+
 	_, err = h.db.NewUpdate().
-		Model(token).
-		Column("access_token", "expires_at", "updated_at").
+		Model((*models.UserOAuthToken)(nil)).
+		Set("access_token = ?", encAccessToken).
+		Set("expires_at = ?", token.ExpiresAt).
+		Set("updated_at = ?", token.UpdatedAt).
 		Where("id = ?", token.ID).
 		Exec(ctx)
 

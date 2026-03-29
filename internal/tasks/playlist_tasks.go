@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -39,7 +40,10 @@ func NewPlaylistConversionTask(payload PlaylistConversionPayload) (*asynq.Task, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
-	return asynq.NewTask(TypePlaylistConversion, payloadBytes), nil
+	return asynq.NewTask(TypePlaylistConversion, payloadBytes,
+		asynq.MaxRetry(3),
+		asynq.Timeout(30*time.Minute),
+	), nil
 }
 
 // AnalyticsUpdatePayload represents the task payload for analytics updates
@@ -62,7 +66,10 @@ func NewAnalyticsUpdateTask(payload AnalyticsUpdatePayload) (*asynq.Task, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal analytics payload: %w", err)
 	}
-	return asynq.NewTask(TypeAnalyticsUpdate, payloadBytes), nil
+	return asynq.NewTask(TypeAnalyticsUpdate, payloadBytes,
+		asynq.MaxRetry(5),
+		asynq.Timeout(1*time.Minute),
+	), nil
 }
 
 // RetryFailedTracksPayload represents the task payload for retrying failed tracks
@@ -83,7 +90,10 @@ func NewRetryFailedTracksTask(payload RetryFailedTracksPayload) (*asynq.Task, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal retry payload: %w", err)
 	}
-	return asynq.NewTask(TypeRetryFailedTracks, payloadBytes), nil
+	return asynq.NewTask(TypeRetryFailedTracks, payloadBytes,
+		asynq.MaxRetry(3),
+		asynq.Timeout(30*time.Minute),
+	), nil
 }
 
 // PlaylistConversionProcessor handles playlist conversion tasks

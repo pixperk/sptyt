@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/pixperk/sptyt/pkg/httputil"
 )
 
 type Client struct {
@@ -57,7 +59,7 @@ func (c *Client) SearchLyrics(ctx context.Context, trackName string, artist stri
 
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httputil.DoWithRetry(ctx, c.httpClient, req, 2)
 	if err != nil {
 		return "", err
 	}

@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/pixperk/sptyt/pkg/httputil"
 )
 
 // YouTubeAPIError represents a structured YouTube API error
@@ -170,7 +172,7 @@ func (c *Client) SearchOfficialMV(ctx context.Context, trackName string, artist 
 		return "", err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httputil.DoWithRetry(ctx, c.httpClient, req, 2)
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +221,7 @@ func (c *Client) SearchLyricVideo(ctx context.Context, trackName string, artist 
 		return "", err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httputil.DoWithRetry(ctx, c.httpClient, req, 2)
 	if err != nil {
 		return "", err
 	}
@@ -273,7 +275,7 @@ func (c *Client) searchWithToken(ctx context.Context, accessToken, query string)
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httputil.DoWithRetry(ctx, c.httpClient, req, 2)
 	if err != nil {
 		return "", err
 	}

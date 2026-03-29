@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pixperk/sptyt/internal/crypto"
 	"github.com/uptrace/bun"
 )
 
@@ -78,6 +79,14 @@ func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
 
 	tm.tokenID = token.ID
 
+	// Decrypt tokens read from DB
+	if access, err := crypto.Decrypt(token.AccessToken); err == nil {
+		token.AccessToken = access
+	}
+	if refresh, err := crypto.Decrypt(token.RefreshToken); err == nil {
+		token.RefreshToken = refresh
+	}
+
 	// Check if token is expired or expiring soon
 	if time.Until(token.ExpiresAt) < 5*time.Minute {
 		// Need to refresh
@@ -116,7 +125,14 @@ func (tm *TokenManager) refreshToken(ctx context.Context, token *oauthToken) (*o
 	data.Set("refresh_token", token.RefreshToken)
 	data.Set("grant_type", "refresh_token")
 
-	resp, err := http.Post("https://oauth2.googleapis.com/token", "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://oauth2.googleapis.com/token", strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
@@ -137,14 +153,22 @@ func (tm *TokenManager) refreshToken(ctx context.Context, token *oauthToken) (*o
 		return nil, fmt.Errorf("failed to decode token response: %w", err)
 	}
 
-	// Update token in database
+	// Keep plaintext for in-memory use
 	token.AccessToken = tokenResp.AccessToken
 	token.ExpiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 	token.UpdatedAt = time.Now()
 
+	// Encrypt before persisting to DB
+	encAccessToken, err := crypto.Encrypt(tokenResp.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt token: %w", err)
+	}
+
 	_, err = tm.db.NewUpdate().
-		Model(token).
-		Column("access_token", "expires_at", "updated_at").
+		TableExpr("oauth_tokens").
+		Set("access_token = ?", encAccessToken).
+		Set("expires_at = ?", token.ExpiresAt).
+		Set("updated_at = ?", token.UpdatedAt).
 		Where("id = ?", token.ID).
 		Exec(ctx)
 

@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/pixperk/sptyt/internal/auth"
 	"github.com/pixperk/sptyt/internal/cache"
+	"github.com/pixperk/sptyt/internal/crypto"
 	"github.com/pixperk/sptyt/internal/models"
 	"github.com/uptrace/bun"
 )
@@ -164,12 +165,22 @@ func (h *YouTubeOAuthHandler) Callback(c echo.Context) error {
 	// Save or update OAuth token in database
 	expiresAt := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 
+	// Encrypt tokens before storing
+	encAccessToken, err := crypto.Encrypt(tokenResp.AccessToken)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to secure token")
+	}
+	encRefreshToken, err := crypto.Encrypt(tokenResp.RefreshToken)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to secure token")
+	}
+
 	oauthToken := &models.UserOAuthToken{
 		ID:             uuid.New(),
 		UserID:         user.ID,
 		Provider:       "youtube",
-		AccessToken:    tokenResp.AccessToken,
-		RefreshToken:   tokenResp.RefreshToken,
+		AccessToken:    encAccessToken,
+		RefreshToken:   encRefreshToken,
 		ExpiresAt:      expiresAt,
 		Scope:          youtubeScopes,
 		AccountEmail:   userInfo.Email,

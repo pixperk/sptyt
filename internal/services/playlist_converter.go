@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	neturl "net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -327,9 +329,18 @@ func (s *PlaylistConverterService) ConvertPlaylist(ctx context.Context, job *Con
 				if conversionLogs[i].YouTubeVideoID == videoID {
 					conversionLogs[i].Status = "error"
 					conversionLogs[i].Error = fmt.Sprintf("Failed to add to playlist: %v", err)
-					conversion.SuccessCount--
-					conversion.FailureCount++
 				}
+			}
+		}
+
+		// Recalculate counts from final log state
+		conversion.SuccessCount = 0
+		conversion.FailureCount = 0
+		for _, logItem := range conversionLogs {
+			if logItem.Status == "success" {
+				conversion.SuccessCount++
+			} else {
+				conversion.FailureCount++
 			}
 		}
 	}
@@ -432,13 +443,9 @@ func (s *PlaylistConverterService) matchTracksWithWorkerPool(ctx context.Context
 	}
 
 	// Sort results by original index to maintain Spotify playlist order
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[i].Index > results[j].Index {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Index < results[j].Index
+	})
 
 	return results
 }
@@ -564,19 +571,22 @@ func (s *PlaylistConverterService) cacheYouTubeResult(ctx context.Context, track
 }
 
 // extractVideoID extracts video ID from YouTube URL
-func extractVideoID(url string) string {
-	// URL format: https://www.youtube.com/watch?v=VIDEO_ID
-	if strings.Contains(url, "v=") {
-		parts := strings.Split(url, "v=")
-		if len(parts) > 1 {
-			videoID := parts[1]
-			// Remove any additional query parameters
-			if idx := strings.Index(videoID, "&"); idx != -1 {
-				videoID = videoID[:idx]
-			}
-			return videoID
-		}
+func extractVideoID(rawURL string) string {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return ""
 	}
+
+	// Standard: https://www.youtube.com/watch?v=VIDEO_ID
+	if v := parsed.Query().Get("v"); v != "" {
+		return v
+	}
+
+	// Short: https://youtu.be/VIDEO_ID
+	if parsed.Host == "youtu.be" {
+		return strings.TrimPrefix(parsed.Path, "/")
+	}
+
 	return ""
 }
 

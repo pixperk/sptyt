@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pixperk/sptyt/internal/crypto"
 	"github.com/uptrace/bun"
 )
 
@@ -33,4 +34,20 @@ type UserOAuthToken struct {
 // IsExpired checks if the access token has expired
 func (t *UserOAuthToken) IsExpired() bool {
 	return time.Now().After(t.ExpiresAt)
+}
+
+// DecryptTokens decrypts the access and refresh tokens in-place.
+// Safe to call on tokens that were stored before encryption was enabled.
+func (t *UserOAuthToken) DecryptTokens() error {
+	access, err := crypto.Decrypt(t.AccessToken)
+	if err != nil {
+		return err
+	}
+	refresh, err := crypto.Decrypt(t.RefreshToken)
+	if err != nil {
+		return err
+	}
+	t.AccessToken = access
+	t.RefreshToken = refresh
+	return nil
 }

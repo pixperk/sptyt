@@ -557,6 +557,22 @@ func (h *CustomLinkHandler) GetLinkAnalytics(c echo.Context) error {
 func (h *CustomLinkHandler) VerifyLinkPassword(c echo.Context) error {
 	slug := c.Param("slug")
 
+	// Rate limit password attempts per IP+slug (5 attempts per minute)
+	if h.cache != nil {
+		ip := c.RealIP()
+		rateLimitKey := fmt.Sprintf("pw_rate:%s:%s", ip, slug)
+		bgCtx := context.Background()
+		count, err := h.cache.GetClient().Incr(bgCtx, rateLimitKey).Result()
+		if err == nil {
+			if count == 1 {
+				h.cache.GetClient().Expire(bgCtx, rateLimitKey, 1*time.Minute)
+			}
+			if count > 5 {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too many password attempts. Please try again later.")
+			}
+		}
+	}
+
 	var req struct {
 		Password string `json:"password"`
 	}
