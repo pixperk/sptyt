@@ -1,226 +1,211 @@
-# SPTYT - Spotify to YouTube Playlist Converter
+# sptyt
 
-A production-ready SaaS application that converts Spotify playlists and albums to YouTube playlists with real-time progress tracking, subscription management, and intelligent track matching.
+Convert Spotify playlists and albums to YouTube playlists. Background workers, real-time progress over WebSockets, multi-strategy track matching with caching.
 
-## Overview
+## Why This Exists
 
-SPTYT provides a seamless way to transfer your music collections between Spotify and YouTube. The platform uses multiple matching strategies to ensure the highest quality conversions, including ISRC matching, official music video detection, and lyric video fallbacks.
+You have a Spotify playlist. You want it on YouTube. Sounds simple until you realize Spotify and YouTube have no shared identifier for most tracks. There's no API that maps one to the other. You're left searching YouTube for each track by name and hoping the right video comes back.
 
-## Core Features
+sptyt automates this. It fetches your Spotify playlist, matches each track to a YouTube video using a tiered search strategy, creates a YouTube playlist under your account, and adds the matched videos. The whole thing runs asynchronously with real-time progress updates.
 
-### Playlist Conversion
-- **Multi-format Support**: Convert Spotify playlists, albums, and EPs to YouTube
-- **Intelligent Track Matching**:
-  - ISRC-based exact matching
-  - Official music video detection
-  - Lyric video fallback
-  - Title-based search with artist matching
-- **Real-time Progress**: WebSocket-based live updates during conversion
-- **Background Processing**: Asynchronous job queue using Asynq (Redis-backed)
-- **Worker Pool Architecture**: Concurrent processing with 5 workers for optimal performance
-- **Cover Art Preservation**: Automatically captures and stores playlist/album artwork
+## Architecture
 
-### Smart Link Redirects
-- **Universal Smart Links**: `sptyt.xyz/:link` - Auto-detects Spotify or YouTube links
-- **Lyric Video Mode**: `sptyt.xyz/ly/:link` - Forces lyric video matches
-- **Genius Integration**: `sptyt.xyz/gn/:link` - Redirects to Genius lyrics pages
-- **Reverse Lookup**: `sptyt.xyz/yt/:link` - Find Spotify tracks from YouTube videos
-- **Mobile App Deep Links**: Automatically converts to native app URLs on mobile devices
-- **Redis Caching**: 24-hour cache for track metadata, 1-hour cache for YouTube URLs
+```mermaid
+graph TD
+    Client["Client (Browser)"] -->|HTTP| Echo["Echo Server (Handlers)"]
+    Echo -->|Enqueue| Asynq["Asynq Workers"]
+    Echo <-->|WebSocket| Client
 
-### Subscription Management
-- **Free Tier**: 1 playlist per month, 10 songs maximum
-- **Premium Tier**: 20 playlists per month, 100 songs maximum
-- **DodoPay Integration**: Secure payment processing with card and UPI support
-- **Automatic Billing**: Handles subscription lifecycle events (renewals, cancellations, failures)
-- **Webhook Security**: Signature verification using Standard Webhooks specification
-
-### Analytics & Monitoring
-- **User Analytics Dashboard**:
-  - Total conversions and success rates
-  - Monthly usage tracking with automatic resets
-  - Track-level statistics (matched vs failed)
-  - Match method distribution
-- **Conversion History**:
-  - Paginated detailed view with cover images
-  - Separated successful and failed tracks
-  - Match method tracking (ISRC, official MV, lyric video)
-  - Full track metadata storage
-
-### Authentication & Authorization
-- **Clerk Integration**: Secure user authentication and session management
-- **YouTube OAuth 2.0**:
-  - Complete OAuth flow with state validation
-  - Automatic token refresh (5-minute expiry detection)
-  - Google account information retrieval (email, name, profile picture)
-  - Disconnect and reconnect capabilities
-- **Scope Management**: YouTube + OpenID + Profile + Email permissions
-
-## Technical Architecture
-
-### Backend Stack
-- **Language**: Go 1.21+
-- **Web Framework**: Echo v4
-- **Database**: PostgreSQL with Bun ORM
-- **Cache**: Redis for caching and job queue
-- **Task Queue**: Asynq for background job processing
-- **WebSockets**: Real-time progress updates via WebSocket Hub
-
-### External Integrations
-- **Spotify API**: Client credentials flow for playlist and track metadata
-- **YouTube Data API v3**: Playlist creation and video search
-- **Genius API**: Lyrics search and metadata
-- **Google OAuth 2.0**: YouTube account authorization
-- **DodoPay**: Payment processing and subscription management
-- **Clerk**: Authentication and user management
-
-### Infrastructure Features
-- **Database Migrations**: Safe ALTER TABLE patterns with IF NOT EXISTS
-- **Indexed Queries**: Unique indexes on user_id for fast lookups
-- **Rate Limiting**: Per-IP and per-user rate limiting middleware
-- **Mobile Detection**: Automatic mobile app redirect middleware
-- **CORS**: Configured for cross-origin requests
-- **Error Recovery**: Panic recovery middleware with logging
-
-## Performance Optimizations
-
-### Caching Strategy
-- **Track Metadata**: 24-hour TTL in Redis
-- **YouTube URLs**: 1-hour TTL in Redis
-- **OAuth State Tokens**: 10-minute TTL in Redis
-- **No Analytics Caching**: Direct indexed database queries (faster than cache invalidation)
-
-### Database Optimization
-- Unique index on `user_analytics.user_id` for O(1) lookups
-- Composite indexes on `playlist_conversions` for efficient filtering
-- Monthly counter stored in single row per user (no aggregation queries)
-
-### Race Condition Prevention
-- Immediate monthly counter increment on conversion start
-- Prevents concurrent request abuse
-- Counter incremented before background job processing
-
-## API Documentation
-
-### Public Endpoints
-```
-GET  /:link                    - Smart redirect (auto-detects Spotify/YouTube)
-GET  /ly/:link                 - Force lyric video redirect
-GET  /gn/:link                 - Redirect to Genius lyrics
-GET  /yt/:youtube_link         - YouTube to Spotify reverse lookup
+    Echo --> Postgres["PostgreSQL (Bun)"]
+    Echo --> Redis["Redis (Cache + Queue)"]
+    Asynq --> Postgres
+    Asynq --> Redis
+    Asynq --> Spotify["Spotify API"]
+    Asynq --> YouTube["YouTube Data API"]
+    Echo --> Spotify
+    Echo --> YouTube
+    Echo --> Genius["Genius API"]
 ```
 
-### Protected Endpoints (Authentication Required)
-```
-# User Management
-GET  /api/me                                      - Current user info
-POST /api/checkout                                - Create payment checkout session
-POST /api/subscription/cancel                     - Cancel subscription
-GET  /api/payment/return                          - Payment return handler
+Three layers:
 
-# YouTube OAuth
-GET  /api/auth/youtube/authorize                  - Start YouTube OAuth flow
-GET  /api/auth/youtube/status                     - YouTube connection status
-GET  /api/auth/youtube/reconnect                  - Reconnect YouTube account
-DELETE /api/auth/youtube/disconnect               - Disconnect YouTube account
+**HTTP handlers** accept requests, validate input, and enqueue background tasks. They never do long-running work inline. A playlist conversion request returns `202 Accepted` immediately with a conversion ID.
 
-# Playlist Conversion
-POST /api/playlists/convert                       - Convert playlist/album
-GET  /api/playlists/conversions                   - List user conversions (basic)
-GET  /api/playlists/conversions/detailed          - Detailed conversions with pagination
-GET  /api/playlists/conversions/:id               - Specific conversion status
-GET  /api/playlists/limits                        - User subscription limits
+**Asynq workers** (Redis-backed) pick up conversion tasks and run the actual matching + playlist creation. Each worker gets a `TokenManager` that auto-refreshes YouTube OAuth tokens mid-conversion so long playlists don't fail halfway through.
 
-# Analytics
-GET  /api/analytics/monthly                       - Monthly usage statistics
+**WebSocket hub** (Redis pub/sub for multi-server) pushes real-time progress events to connected clients. Every 5 matched tracks, the client gets an update with current counts and the track being processed.
 
-# WebSocket
-GET  /api/ws/playlist-progress                    - Real-time conversion progress
+## Track Matching
+
+This is the core problem. Given a Spotify track (name + artists), find the right YouTube video.
+
+```go
+// Strategy 1: Official Music Video (default)
+videoURL, err = s.youtubeClient.SearchOfficialMVWithToken(ctx, accessToken, track.Name, artistsStr)
+
+// Strategy 2: Lyric Video (fallback, or preferred if user requests)
+videoURL, err = s.youtubeClient.SearchLyricVideoWithToken(ctx, accessToken, track.Name, artistsStr)
 ```
 
-### Webhook Endpoints
+Two strategies, tried in order. The user can flip to lyric-video-first mode. Both use the user's own OAuth token so quota burns against their Google account, not the server's API key.
+
+Results are cached in Redis with normalized keys (lowercased, whitespace-collapsed). Cache hits skip the YouTube API entirely. Misses are also cached (6h TTL) to avoid repeatedly searching for tracks YouTube simply doesn't have.
+
 ```
-POST /webhooks/dodopay         - DodoPay payment webhook
-```
-
-## Environment Configuration
-
-```env
-# Server
-PORT=8080
-
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/sptyt
-
-# Redis
-REDIS_HOST=localhost:6379
-REDIS_PASSWORD=
-
-# Spotify API
-SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-
-# YouTube API
-YOUTUBE_API_KEY=your_youtube_api_key
-
-# YouTube OAuth
-YOUTUBE_OAUTH_CLIENT_ID=your_google_oauth_client_id
-YOUTUBE_OAUTH_CLIENT_SECRET=your_google_oauth_client_secret
-YOUTUBE_OAUTH_REDIRECT_URI=https://yourdomain.com/api/auth/youtube/callback
-
-# Genius API
-GENIUS_ACCESS_TOKEN=your_genius_access_token
-
-# Clerk Authentication
-CLERK_SECRET_KEY=your_clerk_secret_key
-
-# DodoPay Payment
-DODOPAY_API_KEY=your_dodopay_api_key
-DODOPAY_API_HOST=https://test.dodopayments.com
-DODOPAY_PRODUCT_ID=your_dodopay_product_id
-DODOPAY_WEBHOOK_SECRET=your_dodopay_webhook_secret
-DODOPAY_RETURN_URL=https://yourdomain.com/payment/return
-
-# Frontend
-FRONTEND_URL=https://yourdomain.com
+yt:search:mv:taylor swift:anti hero    → { video_id, url, match_method }
+yt:search:lyric:taylor swift:anti hero → { video_id, url, match_method }
 ```
 
-## Key Technical Decisions
+Worker pool runs 5 goroutines matching tracks concurrently. Results are collected via channels and sorted by original playlist index before being added to the YouTube playlist:
 
-### Why Asynq Instead of Cron Jobs?
-- Reliable job queue with retries and horizontal scalability
-- Job deduplication and real-time status tracking
-- Redis-backed persistence
+```go
+sort.Slice(results, func(i, j int) bool {
+    return results[i].Index < results[j].Index
+})
+```
 
-### Why No Redis Caching for Monthly Limits?
-- Database query with unique index is already fast (< 1ms)
-- Eliminated race conditions from cache invalidation
-- Simpler codebase with direct database queries
+## Token Management
 
-### Why Immediate Counter Increment?
-- Prevents users from bypassing limits with concurrent requests
-- Counter increments before async job processing
-- Race-safe without distributed locks
+YouTube OAuth tokens expire in ~1 hour. A playlist with 100 tracks can take longer than that. The `TokenManager` handles this transparently:
 
-## New: Custom Bento-Style Links ✨
+```go
+func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
+    tm.mu.Lock()
+    defer tm.mu.Unlock()
 
-### Bento-Style Link Builder
-Create beautiful, customizable shareable links with a modular grid layout inspired by Bento.me:
+    // Cached token still valid (with 5min buffer)?
+    if tm.accessToken != "" && time.Until(tm.expiresAt) > 5*time.Minute {
+        return tm.accessToken, nil
+    }
 
-**Features:**
-- **Flexible Grid Layout**: Each element has custom size (1x1, 2x1, 2x2, etc.)
-- **Rich Element Types**:
-  - Song cards with Spotify, YouTube, YouTube Lyrics, and Genius links
-  - Playlist cards from your converted playlists
-  - Custom text/HTML blocks
-  - Social media links with icons
-  - Standalone images
-- **Per-Element Styling**: Custom colors, gradients, borders, padding, and text styles
-- **Page Customization**: Set background colors and theme (light/dark/auto)
-- **Premium Features**:
-  - Password protection with bcrypt encryption
-  - Custom slugs (e.g., `sptyt.xyz/l/my-music`)
-  - Unlimited links and elements
-- **Analytics**: Track page views and element clicks
-- **Free Tier**: 3 links, 10 elements per link, links expire after 7 days
+    // Fetch from DB, decrypt, refresh if expiring
+    token := /* ... fetch from postgres ... */
+    token.AccessToken, _ = crypto.Decrypt(token.AccessToken)
+    token.RefreshToken, _ = crypto.Decrypt(token.RefreshToken)
 
+    if time.Until(token.ExpiresAt) < 5*time.Minute {
+        refreshed := tm.refreshToken(ctx, &token) // POST to Google, encrypt, persist
+        tm.accessToken = refreshed.AccessToken
+    }
+    return tm.accessToken, nil
+}
+```
+
+Tokens are encrypted at rest with AES-256-GCM. The `enc:` prefix distinguishes encrypted values from legacy plaintext, so existing databases migrate transparently.
+
+## Smart Links
+
+Beyond playlist conversion, sptyt acts as a universal music link redirector:
+
+```
+sptyt.xyz/:link          → auto-detect Spotify/YouTube, redirect to counterpart
+sptyt.xyz/ly/:link       → force lyric video match
+sptyt.xyz/gn/:link       → redirect to Genius lyrics
+sptyt.xyz/yt/:link       → YouTube → Spotify reverse lookup
+```
+
+Mobile detection converts web URLs to native app deep links (`spotify://`, `youtube://`). Everything is cached in Redis with 1-24h TTLs depending on volatility.
+
+## Caching Strategy
+
+Every external API call is fronted by Redis:
+
+| Key Pattern | TTL | What |
+|---|---|---|
+| `track:<id>` | 24h | Spotify track metadata |
+| `track:details:<id>` | 24h | Full track details (cover, duration) |
+| `yt:search:mv:<key>` | 1h | YouTube MV search results |
+| `yt:search:lyric:<key>` | 1h | YouTube lyric video results |
+| `spotify:search:<limit>:<query>` | 1h | Spotify search results |
+| `youtube:mv:<trackID>` | 1h | Resolved YouTube MV URLs |
+| `genius:<trackID>` | 1h | Genius lyrics URLs |
+
+Negative caching (track not found on YouTube) uses a 6h TTL. This prevents burning API quota on repeated searches for the same track that YouTube simply doesn't have.
+
+## Quota Tracking
+
+YouTube Data API v3 has a daily quota of 10,000 units. Search costs 100, playlist insert costs 50. sptyt tracks quota per Google account email (not per user), because quota is tied to the OAuth credential:
+
+```go
+type YouTubeAccountQuota struct {
+    AccountEmail         string    // unique, PK
+    DailySearches        int
+    DailyPlaylistInserts int
+    LastQuotaResetDate   time.Time // resets at UTC midnight
+}
+```
+
+Monthly conversion limits are enforced application-side (50/month, 100 songs/playlist). The counter increments before the async job starts -- not after -- to prevent concurrent requests from bypassing limits.
+
+## Custom Bento Links
+
+Users can create shareable link pages with a grid layout:
+
+- Song cards with Spotify/YouTube/Genius links
+- Playlist cards from converted playlists
+- Custom text blocks, images, social links
+- Password protection (bcrypt, rate-limited to 5 attempts/min)
+- Per-element styling (colors, gradients, borders)
+- View and click analytics
+
+## API
+
+### Public
+```
+GET  /:link                              Smart redirect
+GET  /ly/:link                           Lyric video redirect
+GET  /gn/:link                           Genius lyrics redirect
+GET  /yt/:youtube_link                   YouTube → Spotify
+GET  /api/l/:slug                        Public custom link
+POST /api/l/:slug/verify                 Password verification
+```
+
+### Protected (Clerk auth)
+```
+POST /api/playlists/convert              Start conversion
+GET  /api/playlists/conversions          List conversions
+GET  /api/playlists/conversions/:id      Conversion status
+POST /api/playlists/conversions/:id/retry  Retry failed tracks
+GET  /api/ws/playlist-progress           WebSocket progress
+GET  /api/auth/youtube/authorize         Start YouTube OAuth
+GET  /api/analytics/monthly              Usage stats
+POST /api/links                          Create custom link
+```
+
+## Stack
+
+| Component | Choice |
+|---|---|
+| Language | Go |
+| Web framework | Echo v4 |
+| Database | PostgreSQL (Bun ORM) |
+| Cache + queue | Redis (go-redis + Asynq) |
+| Auth | Clerk (JWT) |
+| YouTube auth | OAuth 2.0 with auto-refresh |
+| Real-time | WebSocket (gorilla) + Redis pub/sub |
+| Token encryption | AES-256-GCM |
+
+## Running
+
+```bash
+cp .env.example .env
+# Fill in: SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, YOUTUBE_API_KEY,
+#          YOUTUBE_OAUTH_CLIENT_ID, YOUTUBE_OAUTH_CLIENT_SECRET,
+#          GENIUS_ACCESS_TOKEN, CLERK_SECRET_KEY
+# Optional: TOKEN_ENCRYPTION_KEY (base64-encoded 32 bytes for token encryption)
+
+docker compose up -d   # postgres + redis
+go run main.go
+```
+
+## Key Design Decisions
+
+**Why Asynq instead of inline processing?** Playlist conversion can take minutes for large playlists. Inline processing would tie up HTTP connections and risk timeouts. Asynq gives us retries (max 3), timeouts (30min), and the client gets immediate feedback via WebSocket.
+
+**Why user OAuth tokens for YouTube search?** YouTube API quota is per-project. If the server's API key handles all searches, one popular day burns the quota for everyone. By using each user's OAuth token, quota distributes naturally across users.
+
+**Why encrypt tokens at rest?** A database breach exposes every user's YouTube account. AES-256-GCM with a server-side key means the tokens are useless without the encryption key. The `enc:` prefix allows transparent migration from plaintext.
+
+**Why no Redis caching for monthly limits?** The `user_analytics` table has a unique index on `user_id`. A direct indexed query is <1ms. Cache invalidation for counters that change on every conversion would add complexity for zero performance gain.
+
+**Why immediate counter increment?** The monthly conversion counter increments before the async job starts. Without this, two concurrent requests could both pass the limit check, both enqueue, and the user gets 2 conversions when they should get 1.
