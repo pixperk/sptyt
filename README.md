@@ -1,6 +1,6 @@
 # sptyt
 
-Convert Spotify playlists and albums to YouTube playlists. Background workers, real-time progress over WebSockets, multi-strategy track matching with caching.
+Spotify-to-YouTube playlist converter, universal music smart links, and customizable bento-style link pages. Background workers, real-time WebSocket progress, multi-strategy track matching with caching, and per-element analytics.
 
 ## Why This Exists
 
