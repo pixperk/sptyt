@@ -89,7 +89,7 @@ func (ph *ProtectedHandler) GetOrCreateUser(c echo.Context) (*models.User, error
 		lastName = *clerkUser.LastName
 	}
 
-	// Create new user in database
+	// Create new user in database (upsert to handle concurrent first-login race)
 	newUser := &models.User{
 		ID:              uuid.New(),
 		ClerkID:         clerkUserID,
@@ -101,7 +101,15 @@ func (ph *ProtectedHandler) GetOrCreateUser(c echo.Context) (*models.User, error
 		UpdatedAt:       time.Now(),
 	}
 
-	_, err = ph.db.NewInsert().Model(newUser).Exec(ctx)
+	_, err = ph.db.NewInsert().
+		Model(newUser).
+		On("CONFLICT (clerk_id) DO UPDATE").
+		Set("first_name = EXCLUDED.first_name").
+		Set("last_name = EXCLUDED.last_name").
+		Set("profile_image_url = EXCLUDED.profile_image_url").
+		Set("updated_at = EXCLUDED.updated_at").
+		Returning("*").
+		Exec(ctx)
 	if err != nil {
 		log.Printf("Failed to create user in database: %v", err)
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to create user profile")

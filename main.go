@@ -153,7 +153,7 @@ func main() {
 		youtubeOAuthHandler := handlers.NewYouTubeOAuthHandler(cfg.DB, redisCache)
 		playlistHandler := handlers.NewPlaylistHandler(cfg.DB, converterService, taskClient, redisCache)
 		playlistLimiter := custommw.NewPlaylistLimiter(cfg.DB, redisCache)
-		wsHandler := handlers.NewWebSocketHandler(wsHub)
+		wsHandler := handlers.NewWebSocketHandler(wsHub, origins)
 		analyticsHandler := handlers.NewAnalyticsHandler(cfg.DB)
 
 		// YouTube OAuth callback (NO AUTH REQUIRED - uses state token)

@@ -696,7 +696,14 @@ func (h *PlaylistHandler) refreshYouTubeToken(ctx context.Context, token *models
 	data.Set("refresh_token", token.RefreshToken)
 	data.Set("grant_type", "refresh_token")
 
-	resp, err := http.Post("https://oauth2.googleapis.com/token", "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://oauth2.googleapis.com/token", strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}

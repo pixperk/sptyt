@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"net/url"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -10,26 +11,36 @@ import (
 	ws "github.com/pixperk/sptyt/internal/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// In production, validate the origin properly
-		return true
-	},
-	// Accept authorization token via subprotocol
-	Subprotocols: []string{"authorization"},
-}
-
 // WebSocketHandler handles WebSocket connections
 type WebSocketHandler struct {
-	hub *ws.Hub
+	hub      *ws.Hub
+	upgrader websocket.Upgrader
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(hub *ws.Hub) *WebSocketHandler {
+func NewWebSocketHandler(hub *ws.Hub, allowedOrigins []string) *WebSocketHandler {
+	originSet := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		parsed, err := url.Parse(o)
+		if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			originSet[parsed.Scheme+"://"+parsed.Host] = true
+		}
+	}
+
 	return &WebSocketHandler{
 		hub: hub,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return false
+				}
+				return originSet[origin]
+			},
+			Subprotocols: []string{"authorization"},
+		},
 	}
 }
 
@@ -59,7 +70,7 @@ func (h *WebSocketHandler) HandleConnection(c echo.Context) error {
 	responseHeader := http.Header{}
 	responseHeader.Set("Sec-WebSocket-Protocol", "authorization")
 
-	conn, err := upgrader.Upgrade(c.Response(), c.Request(), responseHeader)
+	conn, err := h.upgrader.Upgrade(c.Response(), c.Request(), responseHeader)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
 		return err

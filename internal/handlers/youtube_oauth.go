@@ -212,12 +212,11 @@ func (h *YouTubeOAuthHandler) exchangeCodeForToken(ctx context.Context, code str
 		"grant_type":    {"authorization_code"},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://oauth2.googleapis.com/token", nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://oauth2.googleapis.com/token", strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 
-	req.URL.RawQuery = data.Encode()
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 10 * time.Second}

@@ -31,12 +31,16 @@ func RunMigrations(db *bun.DB) {
 	_, err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_id);
 		CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-		CREATE INDEX IF NOT EXISTS idx_users_subscription_tier ON users(subscription_tier);
-		CREATE INDEX IF NOT EXISTS idx_users_subscription_status ON users(subscription_status);
 	`)
 	if err != nil {
 		log.Fatalf("Failed to create indexes: %v", err)
 	}
+
+	// Drop old subscription indexes if they exist
+	_, _ = db.Exec(`
+		DROP INDEX IF EXISTS idx_users_subscription_tier;
+		DROP INDEX IF EXISTS idx_users_subscription_status;
+	`)
 
 	// Drop username column if it exists (cleanup migration)
 	_, err = db.Exec("ALTER TABLE users DROP COLUMN IF EXISTS username")
